@@ -1,0 +1,618 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <link rel="icon" href="data:,">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Skyhawk — C172S Flight Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="./src/style.css" />
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<a href="./index.html" style="position:fixed;right:14px;bottom:14px;z-index:100;color:#e8ecef;text-decoration:none;background:rgba(8,12,16,.82);border:1px solid rgba(255,255,255,.16);border-radius:7px;padding:8px 12px;font:700 12px Barlow,system-ui,sans-serif">← Flight Hangar</a>
+<canvas id="gl" aria-label="Flight simulator view"></canvas>
+
+<!-- HUD -->
+<div id="hud" class="hidden">
+  <div id="topbar">
+    <span id="viewName">COCKPIT</span>
+    <span id="simRate" class="chip">1×</span>
+    <span id="apChip" class="chip hidden">AP</span>
+    <span id="brakeChip" class="chip warn hidden">PARK BRAKE</span>
+    <span id="pauseChip" class="chip warn hidden">PAUSED</span>
+    <span id="yokeChip" class="chip hidden">MOUSE YOKE</span>
+    <span id="imcChip" class="chip hidden">IMC</span>
+  </div>
+  <div id="strip">
+    <div><b id="dIas">0</b><i>KIAS</i></div>
+    <div><b id="dGs">0</b><i>GS kt</i></div>
+    <div><b id="dAlt">0</b><i>ALT ft</i></div>
+    <div><b id="dAgl">0</b><i>AGL ft</i></div>
+    <div><b id="dVs">0</b><i>VS fpm</i></div>
+    <div><b id="dHdg">000</b><i>HDG</i></div>
+    <div><b id="dAoa">0.0</b><i>AOA °</i></div>
+    <div><b id="dG">1.00</b><i>LOAD G</i></div>
+    <div><b id="dRpm">0</b><i>RPM</i></div>
+    <div><b id="dThr">0</b><i>THR %</i></div>
+    <div><b id="dMix">0</b><i>MIX %</i></div>
+    <div><b id="dFlap">0</b><i>FLAPS °</i></div>
+    <div><b id="dTrim">0</b><i>TRIM</i></div>
+    <div><b id="dWind">—</b><i>WIND</i></div>
+  </div>
+  <canvas id="mini" width="440" height="440" aria-label="Mini map"></canvas>
+  <div id="toast"></div>
+  <div id="tip" class="hidden"></div>
+  <div id="cross" class="hidden"></div>
+  <div id="fps" class="hidden"></div>
+</div>
+
+<!-- full map -->
+<div id="mapWrap" class="hidden">
+  <canvas id="map" aria-label="Navigation map"></canvas>
+  <div class="mapbar">
+    <strong>SECTIONAL — CEDAR VALLEY AREA</strong>
+    <button id="mapCenter">Center on aircraft</button>
+    <button id="mapRot">Follow</button>
+    <span class="hint">Drag to pan · Wheel to zoom · Double-click to reposition aircraft · M to close</span>
+  </div>
+  <div id="mapInfo"></div>
+</div>
+
+<!-- help -->
+<div id="help" class="hidden panelBox">
+  <h2>Controls &amp; procedures</h2>
+  <div class="cols">
+    <section><h3>Primary flight controls</h3>
+      <dl>
+        <dt>↑ / ↓</dt><dd>Elevator (↓ = pull, nose up)</dd>
+        <dt>← / →</dt><dd>Ailerons</dd>
+        <dt>Z / X  (Q / E)</dt><dd>Rudder</dd>
+        <dt>Home / End</dt><dd>Elevator trim nose down / up</dd>
+        <dt>W / S, PgUp / PgDn</dt><dd>Throttle</dd>
+        <dt>] / [</dt><dd>Mixture rich / lean</dd>
+        <dt>F / V</dt><dd>Flaps down / up one notch</dd>
+        <dt>B (hold)</dt><dd>Toe brakes · <kbd>,</kbd> <kbd>.</kbd> left / right</dd>
+        <dt>P</dt><dd>Parking brake</dd>
+        <dt>Y</dt><dd>Mouse-yoke mode on/off</dd>
+        <dt>Gamepad</dt><dd>L-stick yoke, R-stick X rudder / Y throttle, LB/RB flaps, A brakes</dd>
+      </dl></section>
+    <section><h3>Engine, electrical, lights</h3>
+      <dl>
+        <dt>I / Shift+I</dt><dd>Ignition key → START / → OFF (hold I at START)</dd>
+        <dt>Shift+M</dt><dd>Master BAT + ALT</dd>
+        <dt>Shift+V</dt><dd>Avionics bus</dd>
+        <dt>Shift+E</dt><dd>Auto-start (runs the starting checklist for you)</dd>
+        <dt>L / Shift+L</dt><dd>Landing / taxi light</dd>
+        <dt>O / Shift+O</dt><dd>Strobes / nav lights</dd>
+        <dt>K</dt><dd>Set altimeter to field QNH</dd>
+        <dt>D</dt><dd>Align heading indicator with compass</dd>
+        <dt>Click panel</dt><dd>Every switch, knob &amp; button is live. Scroll over knobs to turn (Shift = ×10)</dd>
+      </dl></section>
+    <section><h3>Autopilot (KAP 140), views, sim</h3>
+      <dl>
+        <dt>A</dt><dd>AP engage / disconnect</dd>
+        <dt>Shift+H · Shift+N · Shift+R · Shift+T</dt><dd>HDG · NAV · APR · ALT hold</dd>
+        <dt>Shift+← / →</dt><dd>Heading bug</dd>
+        <dt>Shift+↑ / ↓</dt><dd>AP vertical speed / altitude ±</dd>
+        <dt>1–7, C</dt><dd>Cockpit · Cabin walk · Orbit · Chase · Tower · Fly-by · Walkaround</dd>
+        <dt>Drag / Wheel</dt><dd>Look around / zoom. Space recenters</dd>
+        <dt>WASD (views 2, 7)</dt><dd>Walk around the cabin or the ramp</dd>
+        <dt>M · N · U</dt><dd>Map · Mini-map · Data strip</dd>
+        <dt>9 · Esc · ?</dt><dd>Sim rate · Pause/menu · This help</dd>
+      </dl></section>
+  </div>
+  <h3>Reference numbers (C172S, 2,550 lb)</h3>
+  <p class="vref">Vr 55 · Vx 62 · Vy 74 · Best glide 68 · Va 105 · Vfe 85 (FULL) / 110 (10°) · Vno 129 · Vne 163 · Vso 40 / Vs1 48 KIAS · Approach 65–70 (flaps 30) · Cruise 2,400 RPM ≈ 110 KTAS</p>
+  <button class="primary" id="helpClose">Close</button>
+</div>
+
+<!-- menu -->
+<div id="menu" class="panelBox">
+  <header>
+    <svg viewBox="0 0 64 64" width="44" height="44" aria-label="Skyhawk logo"><circle cx="32" cy="32" r="30" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M8 34 L56 34 M30 22 L34 22 L35 34 M32 34 L32 50 M24 48 L40 48" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round"/></svg>
+    <div><h1>SKYHAWK</h1><p>Cessna 172S · Blade-element flight model · Cedar Valley region</p></div>
+  </header>
+  <div id="loading"><div class="bar"><div id="loadBar"></div></div><span id="loadText">Loading…</span></div>
+  <form id="setup" class="hidden" onsubmit="return false">
+    <div class="grid">
+      <label>Start position
+        <select id="spawn">
+          <option value="KVLY27">KVLY Cedar Valley — Rwy 27, ready for takeoff</option>
+          <option value="KVLY09">KVLY Cedar Valley — Rwy 09, ready for takeoff</option>
+          <option value="KVLYramp">KVLY Cedar Valley — Ramp, cold &amp; dark</option>
+          <option value="ILS27">ILS 27 KVLY — 8 NM final, 3,000 ft</option>
+          <option value="KLKS36">KLKS Lakeshore — Rwy 36</option>
+          <option value="KRDG04">KRDG Granite Ridge — Rwy 04 (mountain strip)</option>
+          <option value="cruise">Cruise 5,500 ft — over the valley</option>
+        </select></label>
+      <label>Time of day <output id="todOut">10:00</output>
+        <input id="tod" type="range" min="4" max="21.5" step="0.25" value="10" /></label>
+      <label>Wind from <output id="wdOut">250°</output>
+        <input id="wdir" type="range" min="0" max="350" step="10" value="250" /></label>
+      <label>Wind speed <output id="wsOut">8 kt</output>
+        <input id="wspd" type="range" min="0" max="35" step="1" value="8" /></label>
+      <label>Turbulence <output id="tbOut">Light</output>
+        <input id="turb" type="range" min="0" max="1" step="0.05" value="0.25" /></label>
+      <label>Clouds
+        <select id="clouds">
+          <option value="0">Clear</option><option value="0.25">Few</option><option value="0.45" selected>Scattered</option><option value="0.68">Broken</option><option value="0.95">Overcast (IMC in layer)</option>
+        </select></label>
+      <label>Cloud base <output id="cbOut">4,500 ft</output>
+        <input id="cbase" type="range" min="1500" max="10000" step="250" value="4500" /></label>
+      <label>Visibility <output id="visOut">40 km</output>
+        <input id="vis" type="range" min="2" max="80" step="1" value="40" /></label>
+      <label>Altimeter (QNH) <output id="qnhOut">29.92 inHg</output>
+        <input id="qnh" type="range" min="28.9" max="30.8" step="0.01" value="30.02" /></label>
+      <label>Temperature (ISA dev) <output id="isaOut">+0 °C</output>
+        <input id="isa" type="range" min="-25" max="30" step="1" value="5" /></label>
+      <label>Fuel per tank <output id="fuelOut">24 gal</output>
+        <input id="fuel" type="range" min="4" max="26" step="1" value="24" /></label>
+      <label>Graphics
+        <select id="quality"><option value="high">High</option><option value="balanced" selected>Balanced</option><option value="perf">Performance</option></select></label>
+    </div>
+    <div class="actions">
+      <button class="primary" id="fly">Fly</button>
+      <button id="showHelp" type="button">Controls</button>
+      <span class="note">No training wheels: real stall, P-factor, torque, density altitude, gyro drift, compass errors, and a structure that breaks.</span>
+    </div>
+  </form>
+</div>
+
+<!-- crash -->
+<div id="crash" class="hidden panelBox">
+  <h2>Accident</h2>
+  <p id="crashWhy"></p>
+  <div class="actions"><button class="primary" id="retry">Restart same setup</button><button id="toMenu">Menu</button></div>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+<script data-pplx-inline-edit>
+(function () {
+  if (window === window.top) return;
+
+  const allowedParentOrigins = ["https://www.perplexity.ai","https://perplexity.ai","https://testing.perplexity.ai","https://staging.perplexity.ai","https://*.preview.i.perplexity.ai","http://perplexity.localhost","http://localhost:1420","http://127.0.0.1:1420","http://localhost:3000","http://127.0.0.1:3000","http://localhost:5173","http://127.0.0.1:5173"];
+  const MAX_FONT_BYTES = 500 * 1024;
+  const MAX_TOTAL_FONT_BYTES = 2 * 1024 * 1024;
+  const DEFAULT_LINE_HEIGHT = 16;
+  let scrollForwarding = false;
+  let scrollRaf = 0;
+  let trustedTopOrigin = null;
+
+  // Allow entries like "https://*.preview.i.perplexity.ai" — the wildcard
+  // matches a single DNS label (no dots), so "https://*.foo" cannot stretch
+  // across multiple labels.
+  function matchesAllowedOrigin(origin) {
+    if (!origin) return false;
+    for (const entry of allowedParentOrigins) {
+      if (!entry.includes("*")) {
+        if (entry === origin) return true;
+        continue;
+      }
+      const pattern = new RegExp(
+        "^" +
+          entry.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^.]+") +
+          "$",
+      );
+      if (pattern.test(origin)) return true;
+    }
+    return false;
+  }
+
+  // Trust decision: when the sender is same-origin-visible (event.origin is a
+  // real origin like https://www.perplexity.ai) we trust event.origin directly.
+  // When event.origin is "null" (opaque broker srcdoc), we fall back to the
+  // broker's stamped `parentOrigin` to identify the top window. The fallback
+  // is claim-only — we rely on the browser's native `targetOrigin` enforcement
+  // on the response path (see postToTrustedTop) to ensure replies can't be
+  // delivered to anyone but the actual top window of that claimed origin.
+  function getTrustedParentOrigin(event) {
+    const forwardedParentOrigin =
+      typeof event.data.parentOrigin === "string" ? event.data.parentOrigin : null;
+    const parentOrigin = event.origin === "null" ? forwardedParentOrigin : event.origin;
+    return matchesAllowedOrigin(parentOrigin) ? parentOrigin : null;
+  }
+
+  // All responses go to window.top with targetOrigin = the allowlisted origin.
+  // An attacker that iframes us inside their own null-origin broker can claim
+  // any parentOrigin they like, but the browser will drop the reply whenever
+  // the real top's origin doesn't match — so the screenshot never leaves.
+  function postToTrustedTop(message) {
+    if (!trustedTopOrigin) return;
+    try {
+      window.top.postMessage(message, trustedTopOrigin);
+    } catch (_error) {}
+  }
+
+  const PICK_CAPABILITIES = ["pick"];
+  const PICK_CHAIN_LENGTH = 4;
+  const PICK_MAX_TEXT_CHARS = 120;
+  const PICK_MAX_HTML_CHARS = 300;
+
+  function truncate(value, maxChars) {
+    return value.length > maxChars ? value.slice(0, maxChars - 1) + "…" : value;
+  }
+
+  function isPickableElement(element) {
+    return (
+      element instanceof Element &&
+      element !== document.documentElement &&
+      element !== document.body
+    );
+  }
+
+  function resolvePickTarget(x, y) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    const element = document.elementFromPoint(x, y);
+    return isPickableElement(element) ? element.closest("svg") || element : null;
+  }
+
+  function pickLabel(element) {
+    if (element.id) return element.localName + "#" + element.id;
+    return [element.localName].concat(Array.from(element.classList).slice(0, 2)).join(".");
+  }
+
+  // Only attributes that help find the element in source. data-* values and URL
+  // query strings or fragments can carry tokens.
+  const PICK_ATTRIBUTES = new Set([
+    "id",
+    "class",
+    "name",
+    "type",
+    "role",
+    "alt",
+    "aria-label",
+    "href",
+    "src",
+  ]);
+
+  function pickAttributeValue(attribute) {
+    return attribute.name === "href" || attribute.name === "src"
+      ? attribute.value.split(/[?#]/)[0]
+      : attribute.value;
+  }
+
+  function describePickElement(element) {
+    const chain = [];
+    for (
+      let current = element;
+      isPickableElement(current) && chain.length < PICK_CHAIN_LENGTH;
+      current = current.parentElement
+    ) {
+      chain.unshift(current);
+    }
+    const attributes = Array.from(element.attributes)
+      .filter((attribute) => PICK_ATTRIBUTES.has(attribute.name))
+      .map((attribute) => ` ${attribute.name}="${pickAttributeValue(attribute).replace(/"/g, "&quot;")}"`)
+      .join("");
+    const text = (element.innerText || element.textContent || "").replace(/\s+/g, " ").trim();
+    return {
+      chain: chain.map(pickLabel),
+      html: truncate(`<${element.localName}${attributes}>`, PICK_MAX_HTML_CHARS),
+      text: text ? truncate(text, PICK_MAX_TEXT_CHARS) : undefined,
+    };
+  }
+
+  // Hover asks once per frame, and innerText on a large section forces layout,
+  // so only the rect is re-read while the pointer stays on the same element.
+  // Clicks ask for fresh details since the page may have changed the element.
+  let lastPick = null;
+
+  function describePickTarget(element, fresh) {
+    if (fresh || lastPick?.element !== element) {
+      lastPick = { element, details: describePickElement(element) };
+    }
+    const rect = element.getBoundingClientRect();
+    return {
+      rect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+      ...lastPick.details,
+    };
+  }
+
+  function inlineAll(original, clone) {
+    if (original.nodeType !== 1 || clone.nodeType !== 1) return;
+
+    try {
+      const computedStyle = getComputedStyle(original);
+      // cssText on a computed style is the serialized declaration in modern
+      // Chromium/Safari — a single read beats enumerating ~400 longhand
+      // properties. Firefox returns "" here, so we fall back on empty.
+      const serialized = computedStyle.cssText;
+      if (serialized) {
+        clone.style.cssText = serialized;
+      } else {
+        const parts = new Array(computedStyle.length);
+        for (let index = 0; index < computedStyle.length; index += 1) {
+          const property = computedStyle[index];
+          parts[index] = `${property}:${computedStyle.getPropertyValue(property)};`;
+        }
+        clone.style.cssText = parts.join("");
+      }
+    } catch (_error) {}
+
+    const originalChildren = original.children;
+    const clonedChildren = clone.children;
+    for (
+      let index = 0;
+      index < originalChildren.length && index < clonedChildren.length;
+      index += 1
+    ) {
+      inlineAll(originalChildren[index], clonedChildren[index]);
+    }
+  }
+
+  function extractFontUrl(srcValue) {
+    const matches = [
+      ...srcValue.matchAll(
+        /url\(["']?([^"')]+)["']?\)(?:\s*format\(["']?([^"')]+)["']?\))?/gi,
+      ),
+    ];
+    if (matches.length === 0) return null;
+    const woff2 = matches.find((m) => m[2] && m[2].toLowerCase().includes("woff2"));
+    if (woff2) return woff2[1];
+    const woff = matches.find((m) => m[2] && m[2].toLowerCase().includes("woff"));
+    if (woff) return woff[1];
+    return matches[0][1];
+  }
+
+  // Cache resolved font URL -> data URI across captures. Fonts on a page
+  // essentially never change, and a batch run emits multiple captures back to
+  // back — without this we'd refetch + re-base64 every time.
+  const fontDataUriCache = new Map();
+  const SRC_DECLARATION_RE = /src\s*:\s*[^;}]+/i;
+
+  async function fetchAsDataUri(url) {
+    if (fontDataUriCache.has(url)) return fontDataUriCache.get(url);
+    let dataUri = null;
+    try {
+      const response = await fetch(url, { mode: "cors", credentials: "omit" });
+      if (response.ok) {
+        const blob = await response.blob();
+        if (blob.size <= MAX_FONT_BYTES) {
+          dataUri = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () =>
+              resolve(typeof reader.result === "string" ? reader.result : null);
+            reader.onerror = () => resolve(null);
+            reader.readAsDataURL(blob);
+          });
+        }
+      }
+    } catch (_error) {
+      dataUri = null;
+    }
+    fontDataUriCache.set(url, dataUri);
+    return dataUri;
+  }
+
+  function collectFontFaceRuleTexts() {
+    const rules = [];
+    for (const sheet of document.styleSheets) {
+      let cssRules;
+      try {
+        cssRules = sheet.cssRules;
+      } catch (_error) {
+        continue;
+      }
+      if (!cssRules) continue;
+      for (const rule of cssRules) {
+        const cssText = rule.cssText || "";
+        if (cssText.startsWith("@font-face")) rules.push(cssText);
+      }
+    }
+    return rules;
+  }
+
+  async function buildInlinedFontCss() {
+    const ruleTexts = collectFontFaceRuleTexts();
+    if (ruleTexts.length === 0) return null;
+
+    const resolved = ruleTexts.map((cssText) => {
+      if (!SRC_DECLARATION_RE.test(cssText)) return null;
+      const srcMatch = cssText.match(/src\s*:\s*([^;}]+)[;}]/i);
+      if (!srcMatch) return null;
+      const url = extractFontUrl(srcMatch[1]);
+      if (!url) return null;
+      try {
+        return { cssText, url: new URL(url, document.baseURI).href };
+      } catch (_error) {
+        return null;
+      }
+    });
+
+    const dataUris = await Promise.all(
+      resolved.map((entry) => (entry ? fetchAsDataUri(entry.url) : Promise.resolve(null))),
+    );
+
+    const inlined = [];
+    let totalBytes = 0;
+    for (let index = 0; index < resolved.length; index += 1) {
+      const entry = resolved[index];
+      const dataUri = dataUris[index];
+      if (!entry || !dataUri) continue;
+      const approxBytes = dataUri.length * 0.75;
+      if (totalBytes + approxBytes > MAX_TOTAL_FONT_BYTES) break;
+      totalBytes += approxBytes;
+      inlined.push(entry.cssText.replace(SRC_DECLARATION_RE, `src: url("${dataUri}")`));
+    }
+    return inlined.length > 0 ? inlined.join("\n") : null;
+  }
+
+  function stripExternal(clone) {
+    const images = clone.querySelectorAll("img");
+    for (let index = 0; index < images.length; index += 1) {
+      const src = images[index].getAttribute("src");
+      if (src && !src.startsWith("data:")) images[index].removeAttribute("src");
+    }
+
+    const elements = clone.querySelectorAll("*");
+    for (let index = 0; index < elements.length; index += 1) {
+      const style = elements[index].style.cssText;
+      if (style && style.includes("url(")) {
+        elements[index].style.cssText = style.replace(
+          /url\(["']?(?!data:)[^)"']*["']?\)/gi,
+          "none",
+        );
+      }
+    }
+  }
+
+  function emitScroll() {
+    scrollRaf = 0;
+    if (!scrollForwarding) return;
+    postToTrustedTop({
+      type: "INLINE_EDIT_SCROLL",
+      scrollX: window.scrollX,
+      scrollY: window.scrollY,
+      capabilities: PICK_CAPABILITIES,
+    });
+  }
+
+  window.addEventListener(
+    "scroll",
+    function () {
+      if (!scrollForwarding || scrollRaf) return;
+      scrollRaf = requestAnimationFrame(emitScroll);
+    },
+    { passive: true, capture: true },
+  );
+
+  async function handleCaptureRequest(event) {
+    const requestId = event.data.requestId;
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+
+    function postResult(dataUrl) {
+      postToTrustedTop({
+        type: "INLINE_EDIT_SCREENSHOT_RESULT",
+        requestId,
+        dataUrl,
+        scrollX,
+        scrollY,
+      });
+    }
+
+    try {
+      // Wait for any pending web fonts to resolve so both inline metrics and
+      // the @font-face inlining below see the same loaded faces.
+      if (document.fonts && document.fonts.ready) {
+        try {
+          await document.fonts.ready;
+        } catch (_error) {}
+      }
+
+      const clone = document.documentElement.cloneNode(true);
+      inlineAll(document.documentElement, clone);
+
+      const removedNodes = clone.querySelectorAll("script,link[rel=\"stylesheet\"],style");
+      for (let index = 0; index < removedNodes.length; index += 1) {
+        removedNodes[index].remove();
+      }
+
+      stripExternal(clone);
+
+      // Re-embed web fonts as data-URI @font-face rules so the SVG rasterizer
+      // can resolve them — external font URLs aren't fetched during
+      // foreignObject rendering, which would otherwise force a fallback face
+      // and change text metrics.
+      const inlinedFontCss = await buildInlinedFontCss();
+      if (inlinedFontCss) {
+        const styleEl = document.createElement("style");
+        styleEl.textContent = inlinedFontCss;
+        const head = clone.querySelector("head");
+        if (head) head.appendChild(styleEl);
+        else clone.insertBefore(styleEl, clone.firstChild);
+      }
+
+      const html = new XMLSerializer().serializeToString(clone);
+      const svg =
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
+        '<foreignObject width="100%" height="100%">' +
+        `<div xmlns="http://www.w3.org/1999/xhtml" style="width:${width}px;height:${height}px;overflow:hidden">` +
+        `<div style="position:relative;left:-${scrollX}px;top:-${scrollY}px">` +
+        html +
+        "</div></div></foreignObject></svg>";
+      const svgUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+      const image = new Image();
+      image.onload = function () {
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d").drawImage(image, 0, 0);
+        postResult(canvas.toDataURL("image/png"));
+      };
+      image.onerror = function () {
+        postResult(null);
+      };
+      image.src = svgUrl;
+    } catch (_error) {
+      postResult(null);
+    }
+  }
+
+  window.addEventListener("message", function (event) {
+    if (!event.data) return;
+    // Only accept messages from the direct parent frame. Blocks sibling /
+    // unrelated-window postMessage senders that could otherwise reach us.
+    if (event.source !== window.parent) return;
+
+    const trustedParentOrigin = getTrustedParentOrigin(event);
+    if (!trustedParentOrigin) return;
+    trustedTopOrigin = trustedParentOrigin;
+
+    if (event.data.type === "INLINE_EDIT_PICK") {
+      const element = resolvePickTarget(event.data.x, event.data.y);
+      postToTrustedTop({
+        type: "INLINE_EDIT_PICK_RESULT",
+        seq: event.data.seq,
+        target: element ? describePickTarget(element, event.data.fresh === true) : null,
+      });
+      return;
+    }
+
+    if (event.data.type === "INLINE_EDIT_SCROLL_START") {
+      scrollForwarding = true;
+      emitScroll();
+      return;
+    }
+
+    if (event.data.type === "INLINE_EDIT_SCROLL_STOP") {
+      scrollForwarding = false;
+      if (scrollRaf) cancelAnimationFrame(scrollRaf);
+      scrollRaf = 0;
+      return;
+    }
+
+    if (event.data.type === "INLINE_EDIT_SCROLL_BY") {
+      const { deltaX, deltaY, deltaMode } = event.data;
+      if (!scrollForwarding || !Number.isFinite(deltaX) || !Number.isFinite(deltaY)) return;
+      if (deltaMode !== 0 && deltaMode !== 1 && deltaMode !== 2) return;
+      const lineHeight =
+        parseFloat(getComputedStyle(document.documentElement).lineHeight) || DEFAULT_LINE_HEIGHT;
+      const scaleX = deltaMode === 1 ? lineHeight : deltaMode === 2 ? window.innerWidth : 1;
+      const scaleY = deltaMode === 1 ? lineHeight : deltaMode === 2 ? window.innerHeight : 1;
+      // The selection overlay receives the wheel event instead of this iframe.
+      // Instant scrolling preserves trackpad deltas even on smooth-scroll sites.
+      window.scrollBy({ left: deltaX * scaleX, top: deltaY * scaleY, behavior: "instant" });
+      emitScroll();
+      return;
+    }
+
+    if (event.data.type !== "INLINE_EDIT_CAPTURE_REQUEST") return;
+
+    handleCaptureRequest(event);
+  });
+})();
+
+
+</script></body>
+</html>

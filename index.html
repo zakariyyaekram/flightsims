@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07111f">
+  <title>Flight Simulator Hangar</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: #edf6ff;
+      background:
+        radial-gradient(circle at 18% 12%, rgba(34, 112, 177, 0.28), transparent 28rem),
+        radial-gradient(circle at 82% 82%, rgba(14, 165, 233, 0.14), transparent 30rem),
+        linear-gradient(135deg, #050a12 0%, #0a1727 58%, #07111f 100%);
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.16;
+      background-image:
+        linear-gradient(rgba(148, 163, 184, 0.12) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(148, 163, 184, 0.12) 1px, transparent 1px);
+      background-size: 48px 48px;
+    }
+    main {
+      position: relative;
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 7vh 0;
+    }
+    .eyebrow {
+      margin: 0 0 10px;
+      color: #67c7ff;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0;
+      max-width: 760px;
+      font-size: clamp(42px, 7vw, 76px);
+      line-height: 0.95;
+      letter-spacing: -0.055em;
+    }
+    .intro {
+      max-width: 620px;
+      margin: 20px 0 34px;
+      color: #aebed0;
+      font-size: 18px;
+      line-height: 1.6;
+    }
+    .simulators {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+    .sim-card {
+      position: relative;
+      min-height: 390px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      overflow: hidden;
+      padding: 28px;
+      border: 1px solid rgba(148, 196, 224, 0.22);
+      border-radius: 22px;
+      color: inherit;
+      text-decoration: none;
+      background: rgba(8, 18, 31, 0.78);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
+      transition: transform 180ms ease, border-color 180ms ease;
+    }
+    .sim-card:hover {
+      transform: translateY(-5px);
+      border-color: rgba(103, 199, 255, 0.7);
+    }
+    .sim-card:focus-visible { outline: 3px solid #67c7ff; outline-offset: 4px; }
+    .sim-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(to top, rgba(4, 10, 18, 0.98) 5%, rgba(4, 10, 18, 0.08) 72%);
+      z-index: 1;
+    }
+    .dreamliner {
+      background: radial-gradient(ellipse at 68% 25%, rgba(183, 224, 255, 0.52), transparent 16rem),
+        linear-gradient(155deg, #65a8cf 0%, #204b70 48%, #091724 100%);
+    }
+    .skyhawk {
+      background: radial-gradient(ellipse at 74% 30%, rgba(242, 163, 58, 0.34), transparent 14rem),
+        linear-gradient(155deg, #78a4bd 0%, #344e62 48%, #18232e 100%);
+    }
+    .triple-seven {
+      background: radial-gradient(ellipse at 68% 25%, rgba(74, 222, 128, 0.28), transparent 16rem),
+        linear-gradient(155deg, #455c4e 0%, #18342a 48%, #071511 100%);
+    }
+    .silhouette {
+      position: absolute;
+      z-index: 1;
+      width: 72%;
+      height: 44%;
+      top: 13%;
+      left: 14%;
+      opacity: 0.82;
+      filter: drop-shadow(0 16px 18px rgba(0, 0, 0, 0.42));
+    }
+    .card-copy { position: relative; z-index: 2; }
+    .tail {
+      display: block;
+      margin-bottom: 7px;
+      color: #94d7ff;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+    h2 {
+      margin: 0 0 7px;
+      font-size: clamp(24px, 3vw, 34px);
+      letter-spacing: -0.035em;
+    }
+    .card-copy p { margin: 0 0 18px; color: #bac9d8; line-height: 1.45; }
+    .launch { color: #fff; font-size: 13px; font-weight: 800; text-transform: uppercase; }
+    .launch::after { content: " →"; color: #67c7ff; font-size: 20px; }
+    @media (max-width: 900px) {
+      main { padding: 42px 0; }
+      .simulators { grid-template-columns: 1fr; }
+      .sim-card { min-height: 330px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">Flight Operations</p>
+    <h1>Choose your aircraft.</h1>
+    <p class="intro">Enter the hangar and launch one of three detailed flight simulators.</p>
+
+    <nav class="simulators" aria-label="Flight simulators">
+      <a class="sim-card dreamliner" href="./boeing787.html">
+        <svg class="silhouette" viewBox="0 0 800 360" aria-hidden="true">
+          <path fill="#dceaf3" d="M50 205l290-49 355-73-31 28-324 112-285 6z"/>
+          <path fill="#aebdcc" d="M340 156l-54 155 31 7 90-152z"/>
+        </svg>
+        <div class="card-copy">
+          <span class="tail">B787-9 • Widebody</span>
+          <h2>AeroSim X-787XP Pro</h2>
+          <p>Advanced systems, approach instruments, living terrain, and multiple cockpit views.</p>
+          <span class="launch">Launch Boeing 787-9</span>
+        </div>
+      </a>
+
+      <a class="sim-card skyhawk" href="./skyhawk.html">
+        <svg class="silhouette" viewBox="0 0 800 360" aria-hidden="true">
+          <path fill="#e8edf0" d="M55 201l275-48 390-85-76 55-315 96-274 4z"/>
+          <path fill="#c8d1d5" d="M344 168l-35 136 26 5 68-141z"/>
+        </svg>
+        <div class="card-copy">
+          <span class="tail">C172S • Trainer</span>
+          <h2>Skyhawk</h2>
+          <p>Cessna 172S flight model, steam gauges, avionics, weather, and flight procedures.</p>
+          <span class="launch">Launch Cessna 172S</span>
+        </div>
+      </a>
+
+      <a class="sim-card triple-seven" href="./boeing777.html">
+        <svg class="silhouette" viewBox="0 0 800 360" aria-hidden="true">
+          <path fill="#dce8df" d="M35 205l320-51 400-78-42 29-358 115-320 5z"/>
+          <path fill="#b9c9bf" d="M360 154l-62 162 34 7 96-162z"/>
+        </svg>
+        <div class="card-copy">
+          <span class="tail">B777 • Widebody</span>
+          <h2>Boeing 777</h2>
+          <p>Interactive flight model, PBR terrain, navigation map, and multiple views.</p>
+          <span class="launch">Launch Boeing 777</span>
+        </div>
+      </a>
+    </nav>
+  </main>
+</body>
+</html>
