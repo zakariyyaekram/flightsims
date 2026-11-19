@@ -1,2 +1,2 @@
 # flightsims
-A bunch of flight sims you can test.
+A collection of flight simulators. Open [index.html](./index.html) to choose which simulator to use.

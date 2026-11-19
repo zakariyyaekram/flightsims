@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flight Hangar — Choose a Simulator</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      background: #07111b;
+      color: #e8f1f7;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 20% 0%, #16344b 0, transparent 42%),
+        linear-gradient(145deg, #07111b, #0b1c2a 60%, #061019);
+    }
+    main { width: min(1120px, calc(100% - 32px)); margin: 0 auto; padding: 64px 0 48px; }
+    header { margin-bottom: 36px; }
+    .eyebrow { color: #8edaff; font: 700 12px ui-monospace, monospace; letter-spacing: .18em; }
+    h1 { margin: 10px 0 12px; font-size: clamp(36px, 7vw, 68px); letter-spacing: -.04em; }
+    header p { max-width: 620px; margin: 0; color: #a9bac6; font-size: 17px; line-height: 1.6; }
+    .sims { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
+    .sim {
+      display: flex;
+      min-height: 220px;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 24px;
+      color: inherit;
+      text-decoration: none;
+      background: rgba(10, 28, 42, .88);
+      border: 1px solid rgba(142, 218, 255, .2);
+      border-radius: 14px;
+      box-shadow: 0 14px 40px #0003;
+      transition: transform .18s ease, border-color .18s ease, background .18s ease;
+    }
+    .sim:hover, .sim:focus-visible {
+      transform: translateY(-4px);
+      background: rgba(15, 43, 61, .96);
+      border-color: #8edaff;
+      outline: none;
+    }
+    .sim h2 { margin: 0 0 10px; font-size: 22px; }
+    .sim p { margin: 0; color: #a9bac6; line-height: 1.5; }
+    .sim span { margin-top: 24px; color: #8edaff; font: 700 12px ui-monospace, monospace; letter-spacing: .1em; }
+    footer { margin-top: 34px; color: #718796; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="eyebrow">FLIGHT SIMULATOR COLLECTION</div>
+      <h1>Choose your simulator</h1>
+      <p>Pick an aircraft and experience before entering a flight. Nothing starts until you choose.</p>
+    </header>
+
+    <section class="sims" aria-label="Available flight simulators">
+      <a class="sim" href="./skyrunner.html">
+        <div><h2>SkyRunner Pro</h2><p>Cessna 172-inspired flight model with ATC, ground services, and ratings.</p></div>
+        <span>OPEN SIMULATOR →</span>
+      </a>
+      <a class="sim" href="./skyhawk.html">
+        <div><h2>Skyhawk</h2><p>Study-style Cessna 172S simulator with detailed systems and flight setup.</p></div>
+        <span>OPEN SIMULATOR →</span>
+      </a>
+      <a class="sim" href="./boeing787.html">
+        <div><h2>AeroSim X-787XP Pro</h2><p>Fly the Boeing 787-9 Dreamliner in a study-level widebody experience.</p></div>
+        <span>OPEN SIMULATOR →</span>
+      </a>
+      <a class="sim" href="./boeing777.html">
+        <div><h2>Boeing 777</h2><p>Take the controls of a long-haul Boeing 777 flight simulator.</p></div>
+        <span>OPEN SIMULATOR →</span>
+      </a>
+      <a class="sim" href="./aerostar.html">
+        <div><h2>AeroStar SR-22</h2><p>General aviation flying in a Cirrus SR-22-inspired aircraft.</p></div>
+        <span>OPEN SIMULATOR →</span>
+      </a>
+    </section>
+
+    <footer>Select a simulator above to begin.</footer>
+  </main>
+</body>
+</html>

@@ -4,7 +4,7 @@
 
 - Aircraft: Cessna 172-inspired aircraft
 - Features: Chase and cockpit views, ATC, ground services, and local star ratings
-- Page: [index.html](./index.html)
+- Page: [skyrunner.html](./skyrunner.html)
 
 ## AeroSim X-787XP Pro
 

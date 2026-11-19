@@ -211,6 +211,20 @@
       letter-spacing: 2px;
     }
     #loading p { color: #789; font-size: 14px; }
+    #hangar-link {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      z-index: 110;
+      padding: 8px 12px;
+      color: #d7f5ff;
+      background: rgba(0, 20, 40, 0.8);
+      border: 1px solid rgba(0, 180, 255, 0.4);
+      border-radius: 6px;
+      font-size: 12px;
+      text-decoration: none;
+    }
+    #hangar-link:hover { background: rgba(0, 100, 160, 0.8); }
 
     .toggle-panel {
       position: absolute;
@@ -269,6 +283,7 @@
   </style>
 </head>
 <body>
+  <a id="hangar-link" href="./index.html">← Choose a simulator</a>
   <div id="loading">
     <h1>SKYRUNNER PRO</h1>
     <p>Loading flight systems, ATC & ground services…</p>
