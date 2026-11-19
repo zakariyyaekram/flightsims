@@ -401,9 +401,10 @@ export function makePanelSurface(canvas) {
 }
 
 // ---------------- Build aircraft ----------------
-export async function buildAircraft({ envMap, panelCanvas, reg = 'N172SP', scheme = 0, interior = true, lights = true }) {
+export async function buildAircraft({ envMap, panelCanvas, reg = 'N172SP', scheme = 0, interior = true, lights = true, aircraftType = 'C172' }) {
   const root = new THREE.Group();
-  root.name = 'C172';
+  root.name = aircraftType;
+  if (aircraftType === 'C152') root.scale.setScalar(0.92);
   const parts = {};
   const livery = makeLiveryTexture(reg, scheme);
   const skin = paintMaterial(envMap, livery, { fuselage: true });

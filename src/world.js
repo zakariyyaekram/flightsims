@@ -48,13 +48,13 @@ function makePoints(list, mat) {
 }
 
 // ---------------- surface strips that follow terrain ----------------
-function stripGeometry(a, u0, u1, v0, v1, du = 12, lift = 0.07) {
+function stripGeometry(a, u0, u1, v0, v1, du = 12, lift = 0.07, groundHeight = null) {
   const nu = Math.max(1, Math.ceil((u1 - u0) / du)), nv = Math.max(1, Math.ceil((v1 - v0) / 8));
   const pos = [], uv = [], uvm = [], idx = [];
   for (let j = 0; j <= nu; j++) for (let i = 0; i <= nv; i++) {
     const u = u0 + (u1 - u0) * j / nu, v = v0 + (v1 - v0) * i / nv;
     const { x, z } = fromLocal(a, u, v);
-    pos.push(x, heightAt(x, z) + lift, z);
+    pos.push(x, (groundHeight?.(x, z) ?? heightAt(x, z)) + lift, z);
     uv.push(v / 9, u / 9); uvm.push(i / nv, j / nu);
   }
   for (let j = 0; j < nu; j++) for (let i = 0; i < nv; i++) {
@@ -208,7 +208,7 @@ function boxUV(w, h, d, scale = 4) {
   return g;
 }
 
-export async function buildAirports(scene, envMap, buildAircraftFn) {
+export async function buildAirports(scene, envMap, buildAircraftFn, elevationProvider = null) {
   const [asph, concrete, corr, plaster, roofT] = await Promise.all([
     pbr('asphalt_02', 1), pbr('concrete_floor_02', 1), pbr('corrugated_iron_02', 1), pbr('painted_plaster_wall', 1), pbr('grey_roof_01', 1),
   ]);
@@ -223,36 +223,44 @@ export async function buildAirports(scene, envMap, buildAircraftFn) {
   const concreteM = new THREE.MeshStandardMaterial({ map: concrete.diff, normalMap: concrete.nor, roughness: 0.95 });
   for (const a of AIRPORTS) {
     const ang = -a.hdg * D2R; // rotation about Y so local +u aligns with runway direction
+    const airportHeight = (x, z) => {
+      const cesiumHeight = elevationProvider?.(x, z);
+      return Number.isFinite(cesiumHeight) ? cesiumHeight : a.elev;
+    };
+    const surfaceHeight = (x, z) => {
+      const cesiumHeight = elevationProvider?.(x, z);
+      return Number.isFinite(cesiumHeight) ? cesiumHeight : heightAt(x, z);
+    };
     const placeLocal = (mesh, u, v, yOff = 0, rot = 0) => {
-      const { x, z } = fromLocal(a, u, v); mesh.position.set(x, a.elev + yOff, z); mesh.rotation.y = ang + rot; group.add(mesh); return mesh;
+      const { x, z } = fromLocal(a, u, v); mesh.position.set(x, airportHeight(x, z) + yOff, z); mesh.rotation.y = ang + rot; group.add(mesh); return mesh;
     };
     // runway
-    const rg = stripGeometry(a, -a.len / 2, a.len / 2, -a.wid / 2, a.wid / 2, 10, 0.08);
+    const rg = stripGeometry(a, -a.len / 2, a.len / 2, -a.wid / 2, a.wid / 2, 10, 0.08, surfaceHeight);
     const rm = new THREE.Mesh(rg, pavementMaterial(asph, runwayMarkings(a), 0.92));
     rm.receiveShadow = true; group.add(rm);
     // blast pads / overruns
     for (const e of [-1, 1]) {
-      const g = stripGeometry(a, e < 0 ? -a.len / 2 - 45 : a.len / 2, e < 0 ? -a.len / 2 : a.len / 2 + 45, -a.wid / 2, a.wid / 2, 10, 0.07);
+      const g = stripGeometry(a, e < 0 ? -a.len / 2 - 45 : a.len / 2, e < 0 ? -a.len / 2 : a.len / 2 + 45, -a.wid / 2, a.wid / 2, 10, 0.07, surfaceHeight);
       const m = new THREE.Mesh(g, pavementMaterial(asph, taxiMarkings(45, a.wid), 0.78)); m.receiveShadow = true; group.add(m);
     }
     // parallel taxiway + connectors
     const tw = 12, tv = a.taxiV;
-    const tg = stripGeometry(a, -a.len / 2 + 10, a.len / 2 - 10, tv - tw / 2, tv + tw / 2, 12, 0.075);
+    const tg = stripGeometry(a, -a.len / 2 + 10, a.len / 2 - 10, tv - tw / 2, tv + tw / 2, 12, 0.075, surfaceHeight);
     group.add(Object.assign(new THREE.Mesh(tg, pavementMaterial(asph, taxiMarkings(a.len - 20, tw), 0.82)), { receiveShadow: true }));
     const conns = [-a.len / 2 + 16, 0, a.len / 2 - 16];
     for (const cu of conns) {
       const v0 = Math.min(tv, -a.wid / 2), v1 = Math.max(tv, -a.wid / 2);
-      const g = stripGeometry(a, cu - tw / 2, cu + tw / 2, v0 + (tv < 0 ? -tw / 2 : 0), v1 + (tv < 0 ? 0 : tw / 2), 6, 0.076);
+      const g = stripGeometry(a, cu - tw / 2, cu + tw / 2, v0 + (tv < 0 ? -tw / 2 : 0), v1 + (tv < 0 ? 0 : tw / 2), 6, 0.076, surfaceHeight);
       // markings oriented along v for connectors (reuse generic marks)
       group.add(Object.assign(new THREE.Mesh(g, pavementMaterial(asph, taxiMarkings(30, tw), 0.82)), { receiveShadow: true }));
     }
     // apron
     const ap = a.apron;
-    const apg = stripGeometry(a, ap.u - ap.w / 2, ap.u + ap.w / 2, ap.v - ap.h / 2, ap.v + ap.h / 2, 12, 0.074);
+    const apg = stripGeometry(a, ap.u - ap.w / 2, ap.u + ap.w / 2, ap.v - ap.h / 2, ap.v + ap.h / 2, 12, 0.074, surfaceHeight);
     group.add(Object.assign(new THREE.Mesh(apg, pavementMaterial(concrete, apronMarkings(ap.h, ap.w), 0.95)), { receiveShadow: true }));
     // apron <-> taxiway link
     {
-      const g = stripGeometry(a, ap.u - 8, ap.u + 8, Math.min(tv, ap.v + ap.h / 2), Math.max(tv, ap.v + ap.h / 2), 6, 0.0745);
+      const g = stripGeometry(a, ap.u - 8, ap.u + 8, Math.min(tv, ap.v + ap.h / 2), Math.max(tv, ap.v + ap.h / 2), 6, 0.0745, surfaceHeight);
       group.add(Object.assign(new THREE.Mesh(g, pavementMaterial(asph, taxiMarkings(30, 16), 0.82)), { receiveShadow: true }));
     }
     // ---- buildings along far side of apron ----
@@ -270,9 +278,9 @@ export async function buildAirports(scene, envMap, buildAircraftFn) {
       for (let k = 1; k < 5; k++) { const l = new THREE.Mesh(new THREE.BoxGeometry(0.12, hh * 0.85, 0.08), metal); l.position.set(-hw * 0.43 + k * hw * 0.86 / 5, hh * 0.43, hd / 2 + 0.06); hang.add(l); }
       // hangar faces runway: local +z of group toward +v (runway side)
       const { x, z } = fromLocal(a, u, bv - hd / 2);
-      hang.position.set(x, a.elev, z); hang.rotation.y = ang + Math.PI; group.add(hang);
+      hang.position.set(x, airportHeight(x, z), z); hang.rotation.y = ang + Math.PI; group.add(hang);
       // hangar ceiling light (night)
-      lightsList.push({ p: [x + a.perp[0] * (hd / 2 + 0.5), a.elev + hh * 0.9, z + a.perp[1] * (hd / 2 + 0.5)], c: [1, 0.85, 0.6], s: 1.6 });
+      lightsList.push({ p: [x + a.perp[0] * (hd / 2 + 0.5), airportHeight(x, z) + hh * 0.9, z + a.perp[1] * (hd / 2 + 0.5)], c: [1, 0.85, 0.6], s: 1.6 });
     }
     // FBO / terminal
     {
@@ -284,7 +292,20 @@ export async function buildAirports(scene, envMap, buildAircraftFn) {
       const sign = document.createElement('canvas'); sign.width = 512; sign.height = 64; const sg = sign.getContext('2d'); sg.fillStyle = '#1b3a5c'; sg.fillRect(0, 0, 512, 64); sg.fillStyle = '#fff'; sg.font = '700 38px Barlow, sans-serif'; sg.textAlign = 'center'; sg.fillText(a.name.toUpperCase(), 256, 46);
       const st = new THREE.CanvasTexture(sign); st.colorSpace = THREE.SRGBColorSpace;
       const sm = new THREE.Mesh(new THREE.PlaneGeometry(14, 1.75), new THREE.MeshStandardMaterial({ map: st, roughness: 0.6 })); sm.position.set(0, 5.6, 8.05); b.add(sm);
-      const { x, z } = fromLocal(a, u, bv - 8); b.position.set(x, a.elev, z); b.rotation.y = ang + Math.PI; group.add(b);
+      // layered terminal glazing and short jetway fingers for a more realistic apron frontage
+      const gateCount = a.icao === 'KSFO' ? 6 : a.len >= 2800 ? 4 : 2;
+      for (let i = 0; i < gateCount; i++) {
+        const gx = gateCount === 1 ? 0 : -13 + i * (26 / (gateCount - 1));
+        const pier = new THREE.Mesh(boxUV(5.5, 3.2, 7.5, 2), wallM);
+        pier.position.set(gx, 1.6, 11.6); pier.castShadow = pier.receiveShadow = true; b.add(pier);
+        const gateGlass = new THREE.Mesh(new THREE.PlaneGeometry(4.4, 2.2), darkGlass);
+        gateGlass.position.set(gx, 2.0, 15.38); b.add(gateGlass);
+        const jetway = new THREE.Mesh(boxUV(1.25, 2.4, 5.2, 2), wallM);
+        jetway.position.set(gx, 1.2, 17.0); jetway.rotation.x = -0.18; jetway.castShadow = true; b.add(jetway);
+        const canopy = new THREE.Mesh(boxUV(2.8, 0.25, 5.8, 2), roofM);
+        canopy.position.set(gx, 3.0, 16.8); canopy.rotation.x = -0.18; b.add(canopy);
+      }
+      const { x, z } = fromLocal(a, u, bv - 8); b.position.set(x, airportHeight(x, z), z); b.rotation.y = ang + Math.PI; group.add(b);
       // fuel farm
       const tank = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 7, 24).rotateZ(Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xf0efe9, roughness: 0.4, metalness: 0.2 }));
       tank.castShadow = true; placeLocal(tank, u + 26, bv - 2, 2.1);
@@ -298,22 +319,22 @@ export async function buildAirports(scene, envMap, buildAircraftFn) {
       const cabRoof = new THREE.Mesh(new THREE.CylinderGeometry(5.2, 5.0, 0.7, 8), wallM); cabRoof.position.y = 22.3; cabRoof.castShadow = true; t.add(cabRoof);
       const deck = new THREE.Mesh(new THREE.CylinderGeometry(5.0, 5.0, 0.8, 8), wallM); deck.position.y = 17.6; t.add(deck);
       const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 5, 6), new THREE.MeshStandardMaterial({ color: 0xdddddd })); ant.position.y = 25; t.add(ant);
-      const { x, z } = fromLocal(a, ap.u - ap.w / 2 - 40, ap.v - 10); t.position.set(x, a.elev, z); group.add(t);
-      a.towerPos = new THREE.Vector3(x, a.elev + 20.5, z);
-      lightsList.push({ p: [x, a.elev + 27.6, z], c: [1, 0.1, 0.05], s: 1.4 });
+      const { x, z } = fromLocal(a, ap.u - ap.w / 2 - 40, ap.v - 10); const towerBase = airportHeight(x, z); t.position.set(x, towerBase, z); group.add(t);
+      a.towerPos = new THREE.Vector3(x, towerBase + 20.5, z);
+      lightsList.push({ p: [x, towerBase + 27.6, z], c: [1, 0.1, 0.05], s: 1.4 });
     }
     // rotating beacon pole
     {
       const { x, z } = fromLocal(a, ap.u - ap.w / 2 - 10, ap.v - ap.h / 2 - 30);
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.25, 16, 8), new THREE.MeshStandardMaterial({ color: 0x999999, metalness: 0.7, roughness: 0.4 }));
-      pole.position.set(x, a.elev + 8, z); pole.castShadow = true; group.add(pole);
-      beacons.push({ p: new THREE.Vector3(x, a.elev + 16.5, z) });
+      const beaconBase = airportHeight(x, z); pole.position.set(x, beaconBase + 8, z); pole.castShadow = true; group.add(pole);
+      beacons.push({ p: new THREE.Vector3(x, beaconBase + 16.5, z) });
     }
     // windsock
     {
       const { x, z } = fromLocal(a, -a.len / 2 + 250, a.wid / 2 + 60);
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 6, 8), new THREE.MeshStandardMaterial({ color: 0xdddddd, metalness: 0.6, roughness: 0.4 }));
-      pole.position.set(x, a.elev + 3, z); pole.castShadow = true; group.add(pole);
+      const windBase = airportHeight(x, z); pole.position.set(x, windBase + 3, z); pole.castShadow = true; group.add(pole);
       const sockC = document.createElement('canvas'); sockC.width = 256; sockC.height = 32; const sg = sockC.getContext('2d');
       for (let i = 0; i < 5; i++) { sg.fillStyle = i % 2 ? '#f4f4f4' : '#ff5a12'; sg.fillRect(i * 51.2, 0, 51.2, 32); }
       const st = new THREE.CanvasTexture(sockC); st.colorSpace = THREE.SRGBColorSpace;
@@ -321,11 +342,11 @@ export async function buildAirports(scene, envMap, buildAircraftFn) {
       const uv = sg2.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getY(i), uv.getX(i));
       const sock = new THREE.Mesh(sg2, new THREE.MeshStandardMaterial({ map: st, side: THREE.DoubleSide, roughness: 0.9 }));
       sock.castShadow = true;
-      const piv = new THREE.Group(); piv.position.set(x, a.elev + 5.8, z); piv.add(sock); group.add(piv);
+      const piv = new THREE.Group(); piv.position.set(x, windBase + 5.8, z); piv.add(sock); group.add(piv);
       a.windsock = piv;
       // segmented circle
       const ring = new THREE.Mesh(new THREE.TorusGeometry(10, 0.25, 4, 32).rotateX(Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xf1f1f1, roughness: 0.8 }));
-      ring.position.set(x, a.elev + 0.05, z); group.add(ring);
+      ring.position.set(x, windBase + 0.05, z); group.add(ring);
     }
     // runway edge lights, threshold/end lights
     const instr = !!a.ils;
@@ -333,16 +354,16 @@ export async function buildAirports(scene, envMap, buildAircraftFn) {
       for (const sgn of [-1, 1]) {
         const { x, z } = fromLocal(a, -a.len / 2 + d, sgn * (a.wid / 2 + 1.5));
         const nearEnd = instr && (a.len - d < 600 || d < 600);
-        lightsList.push({ p: [x, a.elev + 0.45, z], c: nearEnd ? [1, 0.82, 0.35] : [1, 0.93, 0.8], s: 1 });
+        lightsList.push({ p: [x, airportHeight(x, z) + 0.45, z], c: nearEnd ? [1, 0.82, 0.35] : [1, 0.93, 0.8], s: 1 });
       }
     }
     for (const e of [-1, 1]) for (let w = -a.wid / 2; w <= a.wid / 2 + 0.1; w += 3) {
       const { x, z } = fromLocal(a, e * (a.len / 2 + 1), w);
-      lightsList.push({ p: [x, a.elev + 0.35, z], c: [0.3, 1, 0.35], s: 0.9 }); // green threshold (seen from approach)
+      lightsList.push({ p: [x, airportHeight(x, z) + 0.35, z], c: [0.3, 1, 0.35], s: 0.9 }); // green threshold (seen from approach)
     }
     // taxiway edge lights (blue)
     for (let d = -a.len / 2 + 10; d <= a.len / 2 - 10; d += 45) for (const sgn of [-1, 1]) {
-      const { x, z } = fromLocal(a, d, tv + sgn * (tw / 2 + 1)); lightsList.push({ p: [x, a.elev + 0.35, z], c: [0.15, 0.35, 1], s: 0.8 });
+      const { x, z } = fromLocal(a, d, tv + sgn * (tw / 2 + 1)); lightsList.push({ p: [x, airportHeight(x, z) + 0.35, z], c: [0.15, 0.35, 1], s: 0.8 });
     }
     // approach lighting (MALSR-like) for ILS end
     if (a.ils) {
@@ -350,7 +371,7 @@ export async function buildAirports(scene, envMap, buildAircraftFn) {
       for (let d = 60; d <= 720; d += 60) for (let w = -6; w <= 6; w += 1.5) {
         if (d > 200 && Math.abs(w) > 2) continue;
         const { x, z } = fromLocal(a, sgnU * (a.len / 2 + d), w);
-        lightsList.push({ p: [x, heightAt(x, z) + 1.2, z], c: [1, 0.95, 0.85], s: 1.1 });
+        lightsList.push({ p: [x, surfaceHeight(x, z) + 1.2, z], c: [1, 0.95, 0.85], s: 1.1 });
       }
     }
     // PAPI (left side of each runway end, 300 m from threshold)
@@ -361,8 +382,8 @@ export async function buildAirports(scene, envMap, buildAircraftFn) {
         const w = -(a.wid / 2 + 15 + k * 9); // left of landing direction
         const { x, z } = fromLocal(a, sgnU * (a.len / 2 - 300), e === 0 ? w : -w);
         const box = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.8, 1.2), new THREE.MeshStandardMaterial({ color: 0xe0a020, roughness: 0.6 }));
-        box.position.set(x, a.elev + 0.4, z); box.rotation.y = ang; group.add(box);
-        units.push({ p: [x, a.elev + 0.85, z], c: [1, 1, 1], s: 2.4, ang: [3.5, 3.17, 2.83, 2.5][k] });
+        const papiHeight = airportHeight(x, z); box.position.set(x, papiHeight + 0.4, z); box.rotation.y = ang; group.add(box);
+        units.push({ p: [x, papiHeight + 0.85, z], c: [1, 1, 1], s: 2.4, ang: [3.5, 3.17, 2.83, 2.5][k] });
       }
       papis.push({ a, e, units, thr: fromLocal(a, sgnU * (a.len / 2 - 300), 0) });
     }
@@ -387,7 +408,8 @@ export async function buildAirports(scene, envMap, buildAircraftFn) {
         const m = await buildAircraftFn({ envMap, reg, scheme: sch, interior: false, lights: false });
         const ap = a.apron; const u = ap.u - ap.w / 2 + 24 + k * 14 * 2, v = ap.v - ap.h * 0.2;
         const { x, z } = fromLocal(a, u, v);
-        m.position.set(x, a.elev + 1.19, z);
+        const parkedCesiumHeight = elevationProvider?.(x, z);
+        m.position.set(x, (Number.isFinite(parkedCesiumHeight) ? parkedCesiumHeight : a.elev) + 1.19, z);
         // nose toward runway (+v side) -> heading = hdg + 90
         const hdg = a.hdg + 90 + (k % 2 ? 6 : -4);
         m.rotation.set(0, (90 - hdg) * D2R, 0);

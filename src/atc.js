@@ -36,6 +36,9 @@ function runwayName(airport, heading) {
 
 export class ATC {
   constructor() {
+    this.enabled = true;
+    this.trafficEnabled = true;
+    this.traffic = [];
     this.reset({ spawn: 'SFO28' });
   }
 
@@ -52,6 +55,13 @@ export class ATC {
     this.options = [];
     this.timer = 0;
     this.messageId = 0;
+    this.trafficTimer = 8;
+    this.trafficEnabled = setup?.aiTraffic !== false;
+    this.traffic = [
+      { callsign: 'United 482', type: 'A320', position: 'northwest', altitude: 3500, heading: 105, report: 'leaving 4,500 for 3,500' },
+      { callsign: 'Alaska 217', type: 'B739', position: 'south', altitude: 5200, heading: 320, report: 'turning final, runway 28L' },
+      { callsign: 'N194SP', type: 'C172', position: 'east', altitude: 1800, heading: 275, report: 'entering the left downwind' },
+    ];
     this.initFromSetup(setup);
   }
 
@@ -112,6 +122,10 @@ export class ATC {
   }
 
   act(action, sim) {
+    if (!this.enabled) {
+      this.setATC('ATC communications are disabled. Enable Realistic ATC communications in setup.', 'RADIO', []);
+      return;
+    }
     const station = STATIONS[this.airport.icao] || { ground: 121.9, tower: 118.0, approach: 125.35 };
     const runway = this.runway;
     const active = Math.round(sim.av.com1.active * 100) / 100;
@@ -241,6 +255,7 @@ export class ATC {
   }
 
   update(sim, dt) {
+    if (!this.enabled) return;
     const F = sim.fdm;
     if (!F) return;
     if (!this.airport || !STATIONS[this.airport.icao]) {
@@ -259,9 +274,20 @@ export class ATC {
     }
 
     this.timer += dt;
+    if (this.trafficEnabled) {
+      this.trafficTimer -= dt;
+      if (this.trafficTimer <= 0) {
+        this.trafficTimer = 35 + Math.floor(Math.random() * 20);
+        const traffic = this.traffic[Math.floor(Math.random() * this.traffic.length)];
+        this.logLine('ATC', `${traffic.callsign}, ${this.airport.icao}, ${traffic.position} at ${traffic.altitude.toLocaleString()} feet, ${traffic.report}.`);
+        if (Math.random() < 0.35) this.setATC(`${traffic.callsign}, report in sight if able. Maintain visual separation.`, 'TOWER',
+          this.options);
+      }
+    }
   }
 
   get status() {
-    return `${this.airport.icao} · ${this.role.toUpperCase()} · ${this.frequency.toFixed(2)} MHz`;
+    const traffic = this.trafficEnabled ? ' · AI TRAFFIC ON' : ' · AI TRAFFIC OFF';
+    return `${this.airport.icao} · ${this.role.toUpperCase()} · ${this.frequency.toFixed(2)} MHz${this.enabled ? traffic : ' · ATC OFF'}`;
   }
 }

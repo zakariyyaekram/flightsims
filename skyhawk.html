@@ -28,6 +28,7 @@
   <div id="topbar">
     <span id="viewName">COCKPIT</span>
     <span id="simRate" class="chip">1×</span>
+    <button id="failureChip" class="chip failureChip hidden" type="button">FAILURE: NONE</button>
     <span id="apChip" class="chip hidden">AP</span>
     <span id="brakeChip" class="chip warn hidden">PARK BRAKE</span>
     <span id="pauseChip" class="chip warn hidden">PAUSED</span>
@@ -66,6 +67,20 @@
     </div>
     <div id="atcOptions"></div>
   </aside>
+  <aside id="failurePanel" class="hidden" aria-label="Emergency procedures">
+    <header>
+      <div>
+        <span class="failureEyebrow">EMERGENCY PROCEDURES</span>
+        <strong id="failureTitle">No failure active</strong>
+      </div>
+      <button id="failureClose" type="button" aria-label="Close failure panel">×</button>
+    </header>
+    <ol id="failureSteps"></ol>
+    <div class="actions">
+      <button id="triggerFailure" type="button" class="primary">Trigger failure</button>
+      <button id="clearFailure" type="button">Reset failure</button>
+    </div>
+  </aside>
   <div id="toast"></div>
   <div id="tip" class="hidden"></div>
   <div id="cross" class="hidden"></div>
@@ -99,6 +114,8 @@
         <dt>F / V</dt><dd>Flaps down / up one notch</dd>
         <dt>B (hold)</dt><dd>Toe brakes · <kbd>,</kbd> <kbd>.</kbd> left / right</dd>
         <dt>P</dt><dd>Parking brake</dd>
+        <dt>R</dt><dd>Request ground refueling while stopped at an airport</dd>
+        <dt>J / Shift+J</dt><dd>Connect / disconnect ground services</dd>
         <dt>Y</dt><dd>Mouse-yoke mode on/off</dd>
         <dt>Gamepad</dt><dd>L-stick yoke, R-stick X rudder / Y throttle, LB/RB flaps, A brakes</dd>
       </dl></section>
@@ -126,6 +143,7 @@
         <dt>M · N · U</dt><dd>Map · Mini-map · Data strip</dd>
         <dt>G</dt><dd>Open ATC and transmit readbacks</dd>
         <dt>9 · Esc · ?</dt><dd>Sim rate · Pause/menu · This help</dd>
+        <dt>Shift+F</dt><dd>Open failure and emergency-procedure panel</dd>
       </dl></section>
   </div>
   <h3>Reference numbers (C172S, 2,550 lb)</h3>
@@ -137,14 +155,26 @@
 <div id="menu" class="panelBox">
   <header>
     <svg viewBox="0 0 64 64" width="44" height="44" aria-label="Skyhawk logo"><circle cx="32" cy="32" r="30" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M8 34 L56 34 M30 22 L34 22 L35 34 M32 34 L32 50 M24 48 L40 48" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round"/></svg>
-    <div><h1>SKYHAWK</h1><p>Cessna 172S · Blade-element flight model · San Francisco Bay Area</p></div>
+    <div><h1 id="aircraftTitle">SKYHAWK</h1><p id="aircraftSubtitle">Cessna 172S · Blade-element flight model · San Francisco Bay Area</p></div>
   </header>
   <div id="loadChoice">
-    <h2>Choose simulation detail</h2>
-    <p>Light loads faster with fewer scenery details. Heavy loads the full scenery experience.</p>
-    <div class="actions">
-      <button class="primary" id="loadLight" type="button">Light mode</button>
-      <button id="loadHeavy" type="button">Heavy mode</button>
+    <h2>Choose aircraft and simulation detail</h2>
+    <label class="aircraftChoice">Aircraft
+      <select id="aircraftType">
+        <option value="C172">Cessna 172S Skyhawk — 180 hp trainer</option>
+        <option value="C152">Cessna 152 Aerobat — 110 hp trainer</option>
+      </select>
+    </label>
+    <p>Select an edition to load.</p>
+    <div class="editionActions">
+      <button class="editionButton editionLight" id="loadLight" type="button" onclick="startEdition('light')">
+        <strong>Light Edition</strong>
+        <span>Faster loading · fewer scenery details</span>
+      </button>
+      <button class="editionButton editionHeavy" id="loadHeavy" type="button" onclick="startEdition('heavy')">
+        <strong>Heavy Edition</strong>
+        <span>Full scenery · realistic 3D environment</span>
+      </button>
     </div>
   </div>
   <div id="loading" class="hidden"><div class="bar"><div id="loadBar"></div></div><span id="loadText">Loading…</span></div>
@@ -187,6 +217,17 @@
         <input id="fuel" type="range" min="4" max="26" step="1" value="24" /></label>
       <label>Graphics
         <select id="quality"><option value="lite">Lite — low memory</option><option value="perf">Performance</option><option value="balanced" selected>Balanced</option><option value="high">High</option></select></label>
+      <label class="settingToggle"><input id="atcEnabled" type="checkbox" checked /> Realistic ATC communications</label>
+      <label class="settingToggle"><input id="aiTraffic" type="checkbox" checked /> AI traffic</label>
+      <label>Failure scenario
+        <select id="failureScenario">
+          <option value="none">None — normal operation</option>
+          <option value="engine">Engine failure in flight</option>
+          <option value="alternator">Alternator failure</option>
+          <option value="vacuum">Vacuum pump failure</option>
+          <option value="fuel">Fuel starvation</option>
+        </select></label>
+      <label class="settingToggle"><input id="triggerFailureAtStart" type="checkbox" checked /> Trigger selected failure after starting</label>
     </div>
     <div class="actions">
       <button class="primary" id="fly">Fly</button>
@@ -203,7 +244,31 @@
   <div class="actions"><button class="primary" id="retry">Restart same setup</button><button id="toMenu">Menu</button></div>
 </div>
 
-<script type="module" src="./src/main.js"></script>
+<script>
+window.startEdition = function (mode) {
+  const loadChoice = document.getElementById('loadChoice');
+  const loading = document.getElementById('loading');
+  const setup = document.getElementById('setup');
+  if (loadChoice) loadChoice.classList.add('hidden');
+  if (loading) loading.classList.remove('hidden');
+  if (setup) setup.classList.add('hidden');
+  const text = document.getElementById('loadText');
+  if (text) text.textContent = mode === 'light' ? 'Loading Light Edition…' : 'Loading Heavy Edition…';
+
+  if (typeof window.chooseLoadMode === 'function') {
+    window.chooseLoadMode(mode);
+    return;
+  }
+  import('./src/main.js?v=20261119').then(() => {
+    if (typeof window.chooseLoadMode === 'function') window.chooseLoadMode(mode);
+    else if (text) text.textContent = 'Failed to load the flight simulator.';
+  }).catch((error) => {
+    console.error(error);
+    if (text) text.textContent = 'Failed to load: ' + (error.message || error);
+  });
+};
+</script>
+<script type="module" src="./src/main.js?v=20261119"></script>
 <script data-pplx-inline-edit>
 (function () {
   if (window === window.top) return;

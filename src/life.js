@@ -246,6 +246,51 @@ function busGeo() {
   ]);
 }
 
+function serviceCartGeo(kind) {
+  const W = 1.55;
+  const yellow = [0.95, 0.62, 0.08];
+  const white = [0.82, 0.84, 0.82];
+  const blue = [0.12, 0.35, 0.58];
+  let bodyColor = yellow, bodyHeight = 1.25;
+  let extras = [];
+  if (kind === 'baggage') {
+    bodyColor = yellow;
+    extras = [P(box(2.8, 0.7, W), { color: blue, p: [-0.6, 1.15, 0] })];
+  } else if (kind === 'catering') {
+    bodyColor = white; bodyHeight = 2.2;
+    extras = [
+      P(box(2.7, 1.85, W), { color: white, p: [-0.55, 2.05, 0] }),
+      P(box(2.82, 0.08, W + 0.05), { color: blue, p: [-0.55, 1.15, 0] }),
+    ];
+  } else if (kind === 'stairs') {
+    bodyColor = yellow;
+    extras = [
+      P(box(1.8, 0.12, 1.25), { color: yellow, p: [-0.3, 0.85, 0], r: [0, 0, -0.28] }),
+      P(box(0.12, 1.15, 0.12), { color: [0.22, 0.24, 0.24], p: [0.75, 0.65, 0.52] }),
+      P(box(0.12, 1.15, 0.12), { color: [0.22, 0.24, 0.24], p: [0.75, 0.65, -0.52] }),
+    ];
+  } else if (kind === 'gpu') {
+    bodyColor = blue; bodyHeight = 1.35;
+    extras = [
+      P(box(0.12, 1.8, 0.08), { color: blue, p: [1.25, 1.35, 0] }),
+      P(cyl(0.09, 0.09, 2.4, 8), { part: 5, color: CHROME, p: [1.25, 2.15, 0], r: [0, 0, Math.PI / 2] }),
+    ];
+  } else if (kind === 'tug') {
+    bodyColor = yellow; bodyHeight = 0.95;
+    extras = [
+      P(box(1.8, 0.12, 0.12), { color: yellow, p: [1.9, 0.7, 0] }),
+      P(cyl(0.12, 0.12, 1.2, 8), { color: blue, p: [-0.2, 1.25, 0], r: [0, 0, Math.PI / 2] }),
+    ];
+  }
+  return merge([
+    P(box(3.1, bodyHeight, W), { color: bodyColor, p: [-0.3, bodyHeight / 2 + 0.25, 0] }),
+    P(box(0.05, 0.18, 0.32), { part: 6, color: [1, 1, 1], p: [1.27, 0.78, 0.48] }),
+    P(box(0.05, 0.18, 0.32), { part: 6, color: [1, 1, 1], p: [1.27, 0.78, -0.48] }),
+    ...extras,
+    ...wheels([0.95, -1.2], 0.32, 0.68, 0.18),
+  ]);
+}
+
 // ------------------------------------------------------------------ people (forward +X, feet at y=0, 1.75 m)
 function personGeo() {
   const parts = [];
@@ -477,11 +522,60 @@ export async function buildLife(scene, opts = {}) {
   const rnd = mulberry(90210);
   const tmp = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 };
   const stats = {};
+  let trafficEnabled = true;
+
+  const aiTrafficGroup = new THREE.Group();
+  aiTrafficGroup.name = 'aiTraffic';
+  group.add(aiTrafficGroup);
+  const aiTraffic = [];
+  const trafficMaterial = new THREE.MeshStandardMaterial({ color: 0xe9edf0, roughness: 0.7, metalness: 0.12 });
+  const trafficDark = new THREE.MeshStandardMaterial({ color: 0x26343d, roughness: 0.55, metalness: 0.25 });
+  function makeTrafficAircraft(index) {
+    const aircraft = new THREE.Group();
+    const fuselage = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.35, 10, 10), trafficMaterial);
+    fuselage.rotation.z = Math.PI / 2;
+    aircraft.add(fuselage);
+    const wings = new THREE.Mesh(new THREE.BoxGeometry(7, 0.18, 18), trafficMaterial);
+    wings.position.x = -0.5;
+    aircraft.add(wings);
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.14, 6), trafficMaterial);
+    tail.position.x = -4.4;
+    aircraft.add(tail);
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.16, 2.2, 2.8), trafficDark);
+    fin.position.set(-4.5, 1.2, 0);
+    aircraft.add(fin);
+    const navRed = new THREE.Mesh(new THREE.SphereGeometry(0.24, 6, 4), new THREE.MeshBasicMaterial({ color: 0xff3030 }));
+    navRed.position.set(-0.5, 0.2, 9);
+    aircraft.add(navRed);
+    const navGreen = new THREE.Mesh(new THREE.SphereGeometry(0.24, 6, 4), new THREE.MeshBasicMaterial({ color: 0x30ff70 }));
+    navGreen.position.set(-0.5, 0.2, -9);
+    aircraft.add(navGreen);
+    aircraft.scale.setScalar(index % 3 === 0 ? 0.9 : 0.75);
+    aircraft.visible = false;
+    aiTrafficGroup.add(aircraft);
+    return aircraft;
+  }
+  const trafficAirports = AIRPORTS.filter((a) => ['KSFO', 'KOAK', 'KSJC', 'KHWD', 'KSQL'].includes(a.icao));
+  for (let i = 0; i < 8; i++) {
+    aiTraffic.push({
+      mesh: makeTrafficAircraft(i),
+      airport: trafficAirports[i % trafficAirports.length],
+      angle: (i / 8) * Math.PI * 2,
+      radius: 3500 + (i % 4) * 1700,
+      altitude: 1200 + (i % 5) * 420,
+      speed: 35 + (i % 3) * 8,
+      headingOffset: i % 2 ? 0 : Math.PI,
+    });
+  }
 
   // ---------- vehicles
   const carMat = lifeMaterial({ glossy: true, rough: 0.6 });
-  const VT = { sedan: sedanGeo(), suv: suvGeo(), pickup: pickupGeo(), truck: truckGeo(), bus: busGeo() };
-  const VMAX = { sedan: 1400, suv: 1000, pickup: 700, truck: 400, bus: 40 };
+  const VT = {
+    sedan: sedanGeo(), suv: suvGeo(), pickup: pickupGeo(), truck: truckGeo(), bus: busGeo(),
+    baggage: serviceCartGeo('baggage'), catering: serviceCartGeo('catering'),
+    stairs: serviceCartGeo('stairs'), gpu: serviceCartGeo('gpu'), tug: serviceCartGeo('tug'),
+  };
+  const VMAX = { sedan: 1400, suv: 1000, pickup: 700, truck: 400, bus: 40, baggage: 80, catering: 50, stairs: 50, gpu: 50, tug: 50 };
   const vpools = {}; for (const k in VT) { vpools[k] = new Pool(VT[k], carMat, VMAX[k], { cast: true }); group.add(vpools[k].mesh); }
   const cars = []; const parked = [];
   const pickType = (kind) => {
@@ -561,24 +655,49 @@ export async function buildLife(scene, opts = {}) {
       }
     }
   }
-  // airport ramp people + fuel truck
+  // airport ramp people and ground-service trucks
   const rampPeople = [];
   {
-    const a = AIRPORTS[0]; const ap = a.apron; const tr = mulberry(31337);
-    for (let i = 0; i < 9; i++) {
-      const u0 = ap.u + (tr() - 0.5) * ap.w * 0.8, v0 = ap.v + (tr() - 0.5) * ap.h * 0.7, u1 = ap.u + (tr() - 0.5) * ap.w * 0.8, v1 = ap.v - ap.h * 0.45;
-      const A = fromLocal(a, u0, v0), B = fromLocal(a, u1, v1);
-      const pts = resample([[A.x, A.z], [B.x, B.z]], 2, false); const back = pts.slice().reverse();
-      const all = pts.concat(back);
-      const path = new Path(Float32Array.from(all.map((p) => p[0])), Float32Array.from(all.map((p) => p[1])), Float32Array.from(all.map((p) => heightAt(p[0], p[1]) + 0.02)));
-      rampPeople.push({ path, s: tr() * path.len, v: i < 2 ? 0 : 1.1 + tr() * 0.4, ph: tr() * TAU, sc: 0.95 + tr() * 0.1, c1: i % 3 === 0 ? [0.95, 0.55, 0.05] : pick(tr, SHIRT), c2: pick(tr, PANTS), c3: pick(tr, SKIN), turn: tr() * TAU });
-    }
-    const f = fromLocal(a, ap.u + ap.w * 0.42, ap.v - ap.h * 0.2);
-    parked.push({ x: f.x, y: heightAt(f.x, f.z) + 0.05, z: f.z, yaw: Math.atan2(-a.dir[1], a.dir[0]), type: 'truck', c1: [0.85, 0.1, 0.08], c2: [0.92, 0.92, 0.9] });
-    for (let i = 0; i < 14; i++) { // staff/visitor car park behind the apron
-      const p = fromLocal(a, ap.u - ap.w * 0.35 + i * 4.2, ap.v - ap.h / 2 - 22);
-      if (rnd() < 0.3) continue;
-      parked.push({ x: p.x, y: heightAt(p.x, p.z) + 0.1, z: p.z, yaw: Math.atan2(-a.perp[1], a.perp[0]), type: pickType('town'), c1: pick(rnd, PAINT), c2: [1, 1, 1] });
+    for (const a of AIRPORTS) {
+      const ap = a.apron;
+      const tr = mulberry(31337 + a.icao.charCodeAt(0) * 100 + a.icao.charCodeAt(1) * 10 + a.icao.charCodeAt(2));
+      if (a.icao === 'KSFO') {
+        for (let i = 0; i < 9; i++) {
+          const u0 = ap.u + (tr() - 0.5) * ap.w * 0.8, v0 = ap.v + (tr() - 0.5) * ap.h * 0.7, u1 = ap.u + (tr() - 0.5) * ap.w * 0.8, v1 = ap.v - ap.h * 0.45;
+          const A = fromLocal(a, u0, v0), B = fromLocal(a, u1, v1);
+          const pts = resample([[A.x, A.z], [B.x, B.z]], 2, false); const back = pts.slice().reverse();
+          const all = pts.concat(back);
+          const path = new Path(Float32Array.from(all.map((p) => p[0])), Float32Array.from(all.map((p) => p[1])), Float32Array.from(all.map((p) => heightAt(p[0], p[1]) + 0.02)));
+          rampPeople.push({ path, s: tr() * path.len, v: i < 2 ? 0 : 1.1 + tr() * 0.4, ph: tr() * TAU, sc: 0.95 + tr() * 0.1, c1: i % 3 === 0 ? [0.95, 0.55, 0.05] : pick(tr, SHIRT), c2: pick(tr, PANTS), c3: pick(tr, SKIN), turn: tr() * TAU });
+        }
+      }
+      const f = fromLocal(a, ap.u + ap.w * 0.42, ap.v - ap.h * 0.2);
+      parked.push({ x: f.x, y: heightAt(f.x, f.z) + 0.05, z: f.z, yaw: Math.atan2(-a.dir[1], a.dir[0]), type: 'truck', c1: [0.85, 0.1, 0.08], c2: [0.92, 0.92, 0.9] });
+
+      const isMajor = ['KSFO', 'KOAK', 'KSJC', 'KHWD', 'KSQL'].includes(a.icao);
+      const serviceTypes = isMajor
+        ? ['baggage', 'catering', 'stairs', 'gpu', 'tug']
+        : ['baggage', 'gpu', 'tug'];
+      serviceTypes.forEach((type, i) => {
+        const p = fromLocal(a, ap.u - ap.w * 0.25 + i * 9.5, ap.v + ap.h * 0.18);
+        const colors = type === 'baggage' ? [[0.95, 0.62, 0.08], [0.12, 0.35, 0.58]]
+          : type === 'catering' ? [[0.82, 0.84, 0.82], [0.12, 0.35, 0.58]]
+          : type === 'stairs' ? [[0.95, 0.62, 0.08], [0.82, 0.84, 0.82]]
+          : type === 'gpu' ? [[0.12, 0.35, 0.58], [0.82, 0.84, 0.82]]
+          : [[0.95, 0.62, 0.08], [0.12, 0.35, 0.58]];
+        parked.push({ x: p.x, y: heightAt(p.x, p.z) + 0.05, z: p.z, yaw: Math.atan2(-a.dir[1], a.dir[0]), type, c1: colors[0], c2: colors[1] });
+      });
+      if (a.icao === 'KSFO' || a.icao === 'KOAK' || a.icao === 'KSJC') {
+        const p = fromLocal(a, ap.u - ap.w * 0.42, ap.v + ap.h * 0.25);
+        parked.push({ x: p.x, y: heightAt(p.x, p.z) + 0.1, z: p.z, yaw: Math.atan2(-a.perp[1], a.perp[0]), type: 'pickup', c1: [0.12, 0.38, 0.62], c2: [0.92, 0.92, 0.9] });
+      }
+      if (a.icao === 'KSFO') {
+        for (let i = 0; i < 14; i++) { // staff/visitor car park behind the apron
+          const p = fromLocal(a, ap.u - ap.w * 0.35 + i * 4.2, ap.v - ap.h / 2 - 22);
+          if (rnd() < 0.3) continue;
+          parked.push({ x: p.x, y: heightAt(p.x, p.z) + 0.1, z: p.z, yaw: Math.atan2(-a.perp[1], a.perp[0]), type: pickType('town'), c1: pick(rnd, PAINT), c2: [1, 1, 1] });
+        }
+      }
     }
   }
   if (opts.houses) for (const h of opts.houses) { // driveway cars
@@ -794,6 +913,19 @@ export async function buildLife(scene, opts = {}) {
   function update(cam, dt, t) {
     U_TIME.value = t; U_NIGHT.value = night;
     const camAgl = cam.y - heightAt(cam.x, cam.z);
+    for (const traffic of aiTraffic) {
+      traffic.visible = trafficEnabled;
+      if (!trafficEnabled) { traffic.mesh.visible = false; continue; }
+      traffic.angle += traffic.speed * dt / traffic.radius;
+      const ca = Math.cos(traffic.angle), sa = Math.sin(traffic.angle);
+      const x = traffic.airport.x + ca * traffic.radius;
+      const z = traffic.airport.z + sa * traffic.radius;
+      const y = traffic.airport.elev + traffic.altitude;
+      const dx = -sa, dz = ca;
+      traffic.mesh.visible = true;
+      traffic.mesh.position.set(x, y, z);
+      traffic.mesh.rotation.set(0.04 * Math.sin(t + traffic.angle), Math.atan2(-dz, dx) + traffic.headingOffset, 0);
+    }
     // vehicles
     const vR = (3500 + Math.min(4000, camAgl * 3)) * (0.55 + 0.45 * quality); const vR2 = vR * vR;
     for (const k in vpools) vpools[k].begin();
@@ -911,6 +1043,7 @@ export async function buildLife(scene, opts = {}) {
   return {
     group, stats, update,
     setNight(n) { night = n; },
+    setTrafficEnabled(enabled) { trafficEnabled = enabled; aiTrafficGroup.visible = enabled; },
     set quality(q) { quality = q; lastFence = null; },
     get quality() { return quality; },
     farms, roads: ROADS, turbines, boats, herds,

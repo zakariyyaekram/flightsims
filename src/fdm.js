@@ -62,7 +62,22 @@ export const C172 = {
   vne: 163, vno: 129, vfe10: 110, vfe: 85,
 };
 
-function buildElements() {
+export const C152 = {
+  emptyMass: 504, // kg (1,111 lb)
+  wingArea: 14.9, span: 10.16, AR: 6.93,
+  inertia: [700, 1200, 1000],
+  propRadius: 0.91, propPitch: 1.37,
+  propAxis: [2.05, 0.0, 0],
+  engineHP: 110, maxRPM: 2550,
+  fuelCapGal: 24,
+  vne: 149, vno: 111, vfe10: 95, vfe: 85,
+  visualScale: 0.92,
+};
+
+export const AIRCRAFT_PROFILES = { C172, C152 };
+
+function buildElements(profile = C172) {
+  const scale = profile.visualScale ?? 1;
   const els = [];
   // Wing: LE at x=+0.45, constant chord 1.63 inboard to 2.6 m, taper to 1.12 at 5.5 m. Dihedral 1.73 deg.
   const bounds = [0.30, 1.0, 1.75, 2.6, 3.3, 4.0, 4.75, 5.5];
@@ -73,11 +88,11 @@ function buildElements() {
       const c = (chord(z0) + chord(z1)) / 2;
       const area = c * (z1 - z0);
       const dih = 1.73 * DEG;
-      const y = 0.95 + zc * Math.tan(dih);
+      const y = (0.95 + zc * Math.tan(dih)) * scale;
       const inc = lerp(1.5, -1.5, (zc - 0.3) / 5.2) * DEG; // washout
       els.push({
-        kind: 'wing', side, idx: i, area, chord: c,
-        pos: [0.45 - 0.25 * c, y, side * zc],
+        kind: 'wing', side, idx: i, area: area * scale * scale, chord: c * scale,
+        pos: [(0.45 - 0.25 * c) * scale, y, side * zc * scale],
         span: [0, Math.sin(dih), side * Math.cos(dih)],
         inc, a0: -2.1 * DEG, slope: 5.05, clmax: 1.74, clmin: -1.15, cd0: 0.0085, cm0: -0.05,
         flap: zc < 2.9 ? Math.min(1, (2.9 - z0) / (z1 - z0)) : 0,
@@ -94,8 +109,8 @@ function buildElements() {
       const z0 = hb[i], z1 = hb[i + 1], zc = (z0 + z1) / 2;
       const c = lerp(1.32, 0.95, zc / 1.72);
       els.push({
-        kind: 'htail', side, idx: i, area: c * (z1 - z0) * 1.13, chord: c,
-        pos: [-4.62 - 0.12 * zc, 0.12, side * zc], span: [0, 0, side],
+        kind: 'htail', side, idx: i, area: c * (z1 - z0) * 1.13 * scale * scale, chord: c * scale,
+        pos: [(-4.62 - 0.12 * zc) * scale, 0.12 * scale, side * zc * scale], span: [0, 0, side],
         inc: -2.6 * DEG, a0: 0, slope: 3.9, clmax: 1.05, clmin: -1.05, cd0: 0.008, cm0: 0,
         prop: zc < 1.0 ? 1 : 0, stall: 0, cl: 0, alpha: 0,
       });
@@ -107,8 +122,8 @@ function buildElements() {
     const y0 = vb[i], y1 = vb[i + 1], yc = (y0 + y1) / 2;
     const c = lerp(1.55, 0.95, (yc - 0.25) / 1.17);
     els.push({
-      kind: 'vtail', idx: i, area: c * (y1 - y0) * 1.05, chord: c,
-      pos: [-4.75 - 0.45 * (yc - 0.25), yc, 0], span: [0, 1, 0],
+      kind: 'vtail', idx: i, area: c * (y1 - y0) * 1.05 * scale * scale, chord: c * scale,
+      pos: [(-4.75 - 0.45 * (yc - 0.25)) * scale, yc * scale, 0], span: [0, 1, 0],
       inc: 0, a0: 0, slope: 3.3, clmax: 1.0, clmin: -1.0, cd0: 0.008, cm0: 0,
       prop: yc < 0.9 ? 1 : 0, stall: 0, cl: 0, alpha: 0,
     });
@@ -117,11 +132,12 @@ function buildElements() {
 }
 
 // Landing gear & structural contact points (body frame)
-function buildContacts() {
+function buildContacts(profile = C172) {
+  const scale = profile.visualScale ?? 1;
   return [
-    { name: 'nose', gear: true, pos: [1.36, -1.22, 0], k: 34000, c: 2600, travel: 0.20, mu: 0.75, steer: true },
-    { name: 'left', gear: true, pos: [-0.30, -1.22, -1.27], k: 62000, c: 5200, travel: 0.13, mu: 0.8, brake: -1 },
-    { name: 'right', gear: true, pos: [-0.30, -1.22, 1.27], k: 62000, c: 5200, travel: 0.13, mu: 0.8, brake: 1 },
+    { name: 'nose', gear: true, pos: [1.36 * scale, -1.22 * scale, 0], k: 34000, c: 2600, travel: 0.20, mu: 0.75, steer: true },
+    { name: 'left', gear: true, pos: [-0.30 * scale, -1.22 * scale, -1.27 * scale], k: 62000, c: 5200, travel: 0.13, mu: 0.8, brake: -1 },
+    { name: 'right', gear: true, pos: [-0.30 * scale, -1.22 * scale, 1.27 * scale], k: 62000, c: 5200, travel: 0.13, mu: 0.8, brake: 1 },
     { name: 'tail', pos: [-5.55, -0.12, 0], k: 90000, c: 6000, mu: 0.5, structural: true },
     { name: 'lwing', pos: [-0.4, 1.05, -5.5], k: 90000, c: 6000, mu: 0.5, structural: true },
     { name: 'rwing', pos: [-0.4, 1.05, 5.5], k: 90000, c: 6000, mu: 0.5, structural: true },
@@ -139,14 +155,21 @@ const PROP_DR = [0.18, 0.16, 0.16, 0.14, 0.12, 0.06];
 const PROP_C = [0.150, 0.148, 0.138, 0.124, 0.104, 0.080];
 
 export class FDM {
-  constructor() {
-    this.els = buildElements();
-    this.contacts = buildContacts();
+  constructor(profile = C172) {
+    this.aircraft = profile;
+    this.els = buildElements(profile);
+    this.contacts = buildContacts(profile);
     this.env = {
       ground: () => ({ h: 0, n: [0, 1, 0], surface: 'runway' }),
       wind: [0, 0, 0], gust: 0, turbulence: 0, isaDev: 0, qnh: 101325,
     };
     this.reset({ pos: [0, 0, 0], hdg: 0, onGround: true });
+  }
+
+  setAircraft(profile = C172) {
+    this.aircraft = profile;
+    this.els = buildElements(profile);
+    this.contacts = buildContacts(profile);
   }
 
   reset({ pos, hdg = 0, alt = null, speedKt = 0, onGround = true, coldDark = false, pitch = 0 }) {
@@ -167,6 +190,7 @@ export class FDM {
       landing: false, taxi: onGround && running, pitotHeat: false, mags: running ? 3 : 0, // 0 OFF 1 R 2 L 3 BOTH 4 START
       fuelSel: 'BOTH', fuelL: 24, fuelR: 24, // gallons
       starter: false, cabinLights: false, panelLights: false,
+      engineFailed: false, alternatorFailed: false, vacuumFailed: false,
     };
     this.eng = {
       running, rpm: running ? (onGround ? 750 : 2350) : 0, map: 0, egt: running ? 1200 : 70, cht: running ? 300 : 70,
@@ -188,6 +212,34 @@ export class FDM {
     this.alpha = 0; this.beta = 0; this.tas = speedKt * KT;
     this.overstress = false;
     if (onGround) this.settleOnGround();
+  }
+
+  triggerFailure(type) {
+    if (type === 'engine') {
+      this.sys.engineFailed = true;
+      this.eng.running = false;
+      this.eng.ff = 0;
+      this.eng.power = 0;
+    } else if (type === 'alternator') {
+      this.sys.alternatorFailed = true;
+    } else if (type === 'vacuum') {
+      this.sys.vacuumFailed = true;
+    } else if (type === 'fuel') {
+      this.sys.fuelSel = 'LEFT';
+      this.sys.fuelL = 0;
+    }
+  }
+
+  resetFailures() {
+    const recoveringEngine = this.sys.engineFailed;
+    this.sys.engineFailed = false;
+    this.sys.alternatorFailed = false;
+    this.sys.vacuumFailed = false;
+    if (recoveringEngine) {
+      this.eng.running = true;
+      this.eng.rpm = Math.max(this.eng.rpm, 2300);
+      this.eng.propOmega = this.eng.rpm * Math.PI / 30;
+    }
   }
 
   // Solve for 1-g level (or gamma) flight at the current speed: adjust AoA & elevator trim until
@@ -226,7 +278,7 @@ export class FDM {
   }
 
   get mass() {
-    return C172.emptyMass + 77 + 14 /*oil*/ + (this.sys.fuelL + this.sys.fuelR) * 2.72 /*kg per gal avgas*/ + (this.payload ?? 80);
+    return this.aircraft.emptyMass + 77 + 14 /*oil*/ + (this.sys.fuelL + this.sys.fuelR) * 2.72 /*kg per gal avgas*/ + (this.payload ?? 80);
   }
 
   // ---- Engine: Lycoming IO-360-L2A, 180 hp @ 2700 rpm ----
@@ -237,7 +289,7 @@ export class FDM {
     // manifold pressure: throttle butterfly; at low throttle, intake vacuum depends on rpm
     const thr = clamp(c.throttle, 0, 1);
     const open = 0.017 + 0.983 * Math.pow(thr, 1.35);
-    const pump = clamp(rpm / 2700, 0, 1.2);
+    const pump = clamp(rpm / this.aircraft.maxRPM, 0, 1.2);
     let map = pAmb * open / (open + 0.16 * pump * (1 - open) + 0.012 * pump) * 0.985;
     if (!e.running) map = lerp(pAmb, map, clamp(rpm / 600, 0, 1));
     e.map = lerp(e.map || pAmb, map, clamp(dt * 8, 0, 1));
@@ -254,7 +306,7 @@ export class FDM {
     else eff = 1 - Math.pow((far - 0.082) / 0.1, 2) * 0.9;
     eff = clamp(eff, 0, 1);
     const magOK = s.mags === 3 || s.mags === 4 ? 1 : s.mags === 1 || s.mags === 2 ? 0.965 : 0;
-    const canRun = fuelAvail && magOK > 0 && eff > 0.15;
+    const canRun = fuelAvail && magOK > 0 && eff > 0.15 && !s.engineFailed;
     // starter
     let starterTq = 0;
     const busOK = s.master && e.battery > 0.05;
@@ -263,12 +315,12 @@ export class FDM {
       // primed injection start: catch probability per second
       if (Math.random() < dt * 3.5) e.running = true;
     }
-    if (e.running && (!canRun || rpm < 120)) e.running = false;
+    if (e.running && (!canRun || rpm < 120 || s.engineFailed)) e.running = false;
     // indicated power: proportional to MAP and rpm (air mass flow)
     let pInd = 0;
     if (e.running) {
       const mapEff = Math.max(0, e.map - 2.6) / (29.92 - 2.6);
-      pInd = C172.engineHP * HP * 1.105 * mapEff * (rpm / 2700) * eff * magOK * Math.sqrt(288.15 / atm.T);
+      pInd = this.aircraft.engineHP * HP * 1.105 * mapEff * (rpm / this.aircraft.maxRPM) * eff * magOK * Math.sqrt(288.15 / atm.T);
     }
     // friction & pumping losses
     const fric = (6.5 + 0.0045 * rpm + 0.0000026 * rpm * rpm) * HP * 0.5 * clamp(rpm / 120, 0, 1);
@@ -276,20 +328,20 @@ export class FDM {
     const tq = (pInd - fric) / omega + starterTq;
     e.power = Math.max(0, pInd - fric);
     // fuel flow (gal/hr): bsfc ~0.45 lb/hp/hr at best power, richer => more fuel
-    const airflow = (e.map / 29.92) * (rpm / 2700) * atm.sigma * Math.sqrt(288.15 / atm.T); // fraction
+    const airflow = (e.map / 29.92) * (rpm / this.aircraft.maxRPM) * atm.sigma * Math.sqrt(288.15 / atm.T); // fraction
     e.ff = e.running ? 14.6 * airflow * far / 0.095 * Math.pow(atm.sigma, 0.0) : 0;
     // EGT peaks near stoichiometric (0.067)
     const egtTarget = e.running ? 1050 + 400 * Math.exp(-Math.pow((far - 0.068) / 0.022, 2)) * (0.6 + 0.4 * (e.power / (180 * HP))) + 150 * (e.power / (180 * HP)) : atm.T * 1.8 - 459.67;
     e.egt = lerp(e.egt, egtTarget, clamp(dt * 0.4, 0, 1));
-    const coolV = Math.max(Vaxial, 0) + 20 * (rpm / 2700);
+    const coolV = Math.max(Vaxial, 0) + 20 * (rpm / this.aircraft.maxRPM);
     const chtTarget = e.running ? 150 + 300 * (e.power / (180 * HP)) * Math.exp(-Math.pow((far - 0.072) / 0.05, 2)) * 1.1 - coolV * 0.35 + 120 : atm.T * 1.8 - 459.67;
     e.cht = lerp(e.cht, chtTarget, clamp(dt * 0.02, 0, 1));
     const oilTarget = e.running ? 150 + 60 * (e.power / (180 * HP)) - Math.max(0, coolV - 40) * 0.12 + (atm.T - 288) * 0.9 : atm.T * 1.8 - 459.67;
     e.oilT = lerp(e.oilT, oilTarget, clamp(dt * 0.006, 0, 1));
-    const oilPTarget = clamp(rpm / 2700, 0, 1) * 80 * (1 - (e.oilT - 160) * 0.002) + (rpm > 300 ? 10 : 0) * 0;
+    const oilPTarget = clamp(rpm / this.aircraft.maxRPM, 0, 1) * 80 * (1 - (e.oilT - 160) * 0.002) + (rpm > 300 ? 10 : 0) * 0;
     e.oilP = lerp(e.oilP, rpm > 200 ? Math.max(oilPTarget, 25 * rpm / 700 > 25 ? 25 : 25 * rpm / 700) : 0, clamp(dt * 2, 0, 1));
     // vacuum pump (engine-driven), suction inHg
-    e.vac = lerp(e.vac, clamp(rpm / 1000, 0, 1) * 5.2, clamp(dt * 3, 0, 1));
+    e.vac = lerp(e.vac, s.vacuumFailed ? 0 : clamp(rpm / 1000, 0, 1) * 5.2, clamp(dt * 3, 0, 1));
     // fuel burn
     const burn = e.ff * dt / 3600;
     if (burn > 0) {
@@ -303,7 +355,7 @@ export class FDM {
   // ---- Propeller blade element (2 blades evaluated at 4 azimuths, half weight each) ----
   propForces(vBody, atm, out) {
     const e = this.eng;
-    const R = C172.propRadius, A = Math.PI * R * R;
+    const R = this.aircraft.propRadius, A = Math.PI * R * R;
     const Om = e.propOmega;
     const Va = vBody[0];
     const vi = e.vi;
@@ -315,7 +367,7 @@ export class FDM {
       const that = cross([1, 0, 0], rhat); // blade motion direction (clockwise seen from cockpit)
       for (let i = 0; i < PROP_R.length; i++) {
         const r = PROP_R[i] * R, dr = PROP_DR[i] * R, c = PROP_C[i];
-        const beta = Math.atan(C172.propPitch / (2 * Math.PI * r)) - 0.6 * DEG;
+        const beta = Math.atan(this.aircraft.propPitch / (2 * Math.PI * r)) - 0.6 * DEG;
         const Vt = Om * r + dot(vBody, that) * 1.0;
         const Vax = Va + vi * (1 - Math.pow(PROP_R[i], 3) * 0.4);
         const phi = Math.atan2(Vax, Math.max(Vt, 0.1));
@@ -329,7 +381,7 @@ export class FDM {
         const dT = q * (cl * Math.cos(phi) - cd * Math.sin(phi));
         const dFt = q * (cl * Math.sin(phi) + cd * Math.cos(phi));
         T += dT; Q += dFt * r;
-        const p = add(C172.propAxis, scl(rhat, r));
+        const p = add(this.aircraft.propAxis, scl(rhat, r));
         const f = add([dT, 0, 0], scl(that, -dFt));
         addTo(F, f); addTo(M, cross(p, f));
       }
@@ -396,7 +448,7 @@ export class FDM {
 
     // ground effect factor (wing height over ground relative to span)
     const hW = Math.max(0.3, agl + 0.0);
-    const x = 16 * hW / C172.span;
+    const x = 16 * hW / this.aircraft.span;
     const phiGE = (x * x) / (1 + x * x); // induced drag multiplier
     this.ge = 1 - phiGE;
 
@@ -417,7 +469,7 @@ export class FDM {
 
     // propwash: final slipstream velocity increment (contracted), swirl
     const washV = 2 * e.vi;
-    const swirl = e.rpm > 200 ? clamp(e.propTorque / (atm.rho * Math.PI * C172.propRadius ** 2 * Math.max(tas + washV, 5) ** 2 * 0.6), -0.4, 0.4) : 0;
+    const swirl = e.rpm > 200 ? clamp(e.propTorque / (atm.rho * Math.PI * this.aircraft.propRadius ** 2 * Math.max(tas + washV, 5) ** 2 * 0.6), -0.4, 0.4) : 0;
 
     // wing/aileron rigging (wash-in on left wing) — trims out torque roll at cruise, like the real airframe
     addTo(M, [0.137 * 0.5 * atm.rho * tas * tas, 0, 0]);
@@ -499,7 +551,7 @@ export class FDM {
         if (st > 0.1) cl *= 1 - 0.12 * st * (0.5 + 0.5 * Math.sin(this.time * 9.1 + el.idx * 1.7 + el.side * 2.2));
         stallMax = Math.max(stallMax, st * (el.ail ? 1.0 : 1.25));
       }
-      const AR = el.kind === 'wing' ? C172.AR : el.kind === 'htail' ? 3.0 : 1.6;
+      const AR = el.kind === 'wing' ? this.aircraft.AR : el.kind === 'htail' ? 3.0 : 1.6;
       const geF = el.kind === 'wing' ? phiGE : 1;
       const cdi = (cl * cl) / (Math.PI * 0.80 * AR) * geF * 0.85;
       const cd = el.cd0 + 0.006 * cl * cl + cdi + cdx + 1.25 * st * Math.pow(Math.sin(alpha), 2) + (el.ail ? 0.006 * Math.abs(this.surf.ail) : 0);
@@ -515,10 +567,10 @@ export class FDM {
         CLw += cl * el.area; wingLift += Lf;
       }
     }
-    CLw /= C172.wingArea;
+    CLw /= this.aircraft.wingArea;
     this.CL = CLw;
     // downwash at tail: eps = 2 CL / (pi AR) reduced in ground effect & by distance factor, lag
-    const epsTarget = (2 * CLw / (Math.PI * C172.AR)) * 1.05 * (0.5 + 0.5 * phiGE);
+    const epsTarget = (2 * CLw / (Math.PI * this.aircraft.AR)) * 1.05 * (0.5 + 0.5 * phiGE);
     this.downwash = lerp(this.downwash, epsTarget, clamp(dt * (tas / 4.6), 0, 1));
 
     // fuselage, landing gear, struts: parasite drag & side force
@@ -554,7 +606,7 @@ export class FDM {
     const acc = scl(Fw, 1 / m);
     this.vel = add(this.vel, scl(acc, dt));
     this.pos = add(this.pos, scl(this.vel, dt));
-    const I = C172.inertia;
+    const I = this.aircraft.inertia;
     // Euler equations: I w' = M - w x (I w)
     const Iw = [I[0] * omB[0], I[1] * omB[1], I[2] * omB[2]];
     const gyro = cross(omB, Iw);
@@ -574,7 +626,7 @@ export class FDM {
     if (this.nz > 4.6 || this.nz < -2.2) this.overstress = true;
     if (this.nz > 6.5 || this.nz < -3.5) this.crash('Structural failure (overstress ' + this.nz.toFixed(1) + ' G)');
     const ias = Math.sqrt(Math.max(0, 2 * qinf / 1.225)) / KT;
-    if (ias > C172.vne * 1.22) this.crash('Structural failure (exceeded Vne by 22%)');
+    if (ias > this.aircraft.vne * 1.22) this.crash('Structural failure (exceeded Vne by 22%)');
     if (this.flapPos > 5 && ias > 125) this.flapOverspeed = true;
 
     // stall warning vane (left wing leading edge) triggers ~5-10 kts before stall
@@ -667,7 +719,7 @@ export class FDM {
   updateSystems(dt, atm, qinf) {
     const s = this.sys, e = this.eng, gy = this.gyro;
     // electrical: 28V alternator when running and alt switch on; 24V battery
-    const altOn = s.master && s.alternator && e.rpm > 900;
+    const altOn = s.master && s.alternator && !s.alternatorFailed && e.rpm > 900;
     let load = 0;
     if (s.master) {
       load += 3; if (s.avionics) load += 6; if (s.beacon) load += 1.5; if (s.nav) load += 1.8; if (s.strobe) load += 2.5; if (s.landing) load += 8; if (s.taxi) load += 6; if (s.pitotHeat) load += 10; if (s.fuelPump) load += 4; if (s.panelLights) load += 1; if (s.cabinLights) load += 1;

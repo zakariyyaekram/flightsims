@@ -1,6 +1,6 @@
 // Skyhawk — main loop, cameras, input, UI.
 import * as THREE from 'three';
-import { FDM, KT, FT } from './fdm.js';
+import { FDM, KT, FT, C172, C152 } from './fdm.js?v=20261119';
 import { qrot } from './math.js';
 import { groundQuery, heightAt, AIRPORTS, NAVAIDS, fromLocal, toLocal, WATER_LEVEL } from './geo.js';
 import { createTerrainMaterial, Terrain } from './terrain.js';
@@ -14,7 +14,7 @@ import { MovingMap } from './map.js';
 import { Sound } from './audio.js';
 import { setAniso } from './textures.js';
 import { ATC } from './atc.js';
-import { initCesium, syncCesiumCamera } from './cesium.js';
+import { initCesium, syncCesiumCamera, getCesiumElevationWorld, warmCesiumTerrain } from './cesium.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
@@ -23,16 +23,23 @@ const INHG = 3386.389;
 
 // ---------------- renderer / scene ----------------
 const canvas = $('gl');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true, powerPreference: 'high-performance' });
-renderer.setClearColor(0x000000, 0);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.5;
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-setAniso(Math.min(16, renderer.capabilities.getMaxAnisotropy()));
+let renderer = null;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true, powerPreference: 'high-performance' });
+} catch (error) {
+  console.error('Could not initialize WebGL.', error);
+}
+if (renderer) {
+  renderer.setClearColor(0x000000, 0);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 0.5;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  setAniso(Math.min(16, renderer.capabilities.getMaxAnisotropy()));
+}
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.02, 90000);
 scene.add(camera);
@@ -40,6 +47,7 @@ scene.add(camera);
 const sim = {
   fdm: new FDM(), av: new Avionics(), panel: null, keys: {}, view: 'cockpit', timeOfDay: 10, simRate: 1, paused: true, started: false,
   weather: { windDir: 250, windKt: 8, turb: 0.25, cover: 0.45, baseFt: 4500, visKm: 40, qnhInHg: 30.02, isa: 5 }, sound: new Sound(),
+  groundServices: { active: false, airport: null },
 };
 window.sim = sim; sim.scene = scene; sim.renderer = renderer;
 sim.atc = new ATC();
@@ -47,62 +55,171 @@ const f = () => sim.fdm;
 sim.fdm.env.ground = groundQuery;
 sim.ndb = NAVAIDS.find((n) => n.type === 'NDB');
 
+function cesiumGroundQuery(x, z) {
+  const local = groundQuery(x, z);
+  const cesiumHeight = getCesiumElevationWorld(x, z);
+  if (!Number.isFinite(cesiumHeight)) return local;
+  const surface = cesiumHeight < WATER_LEVEL
+    ? 'water'
+    : local.surface === 'runway'
+      ? 'runway'
+      : local.surface === 'road'
+        ? 'runway'
+        : 'grass';
+  return {
+    h: surface === 'water' ? WATER_LEVEL : cesiumHeight,
+    n: local.n,
+    surface,
+  };
+}
+
 let env, terrain, terrainMat, aircraft, airports, rocks, forest, grass, town, life, mmap;
 const loadBar = $('loadBar'), loadText = $('loadText');
 let loadMode = null;
 const progress = (p, t) => { loadBar.style.width = Math.round(p * 100) + '%'; loadText.textContent = t; };
 
 async function init() {
-  const loadQuality = loadMode === 'light' ? 0.35 : 1;
+  if (!renderer) throw new Error('WebGL is unavailable in this browser or device.');
   progress(0.03, 'Sky, sun and atmosphere…');
   env = new Environment(renderer, scene);
   env.setTime(sim.timeOfDay);
-  env.sky.visible = false;
-  progress(0.08, 'Connecting to Cesium ion…');
-  await initCesium();
-  progress(0.36, 'Loading World Terrain and aerial imagery…');
-  terrain = null;
-  terrainMat = null;
+  env.sky.visible = true;
+  let cesiumViewer = null;
+  if (loadMode === 'heavy') {
+    progress(0.08, 'Connecting to Cesium ion…');
+    cesiumViewer = await initCesium();
+    env.sky.visible = !cesiumViewer;
+    if (cesiumViewer) {
+      sim.fdm.env.ground = cesiumGroundQuery;
+      progress(0.18, 'Sampling real-world airport elevations…');
+      for (const a of AIRPORTS) {
+        await warmCesiumTerrain(a.x, a.z, Math.max(a.len / 2 + 650, 1900), 300);
+      }
+    }
+    progress(0.36, 'Loading World Terrain, aerial imagery and 3D buildings…');
+  } else {
+    progress(0.36, 'Loading local terrain and flight systems…');
+  }
+  progress(0.38, 'Loading terrain textures…');
+  const useLocalScenery = loadMode !== 'heavy' || !cesiumViewer;
+  if (!useLocalScenery) {
+    terrainMat = null;
+    terrain = null;
+  } else {
+    terrainMat = await createTerrainMaterial(
+      (p) => progress(0.38 + p * 0.12, 'Loading terrain textures…'),
+      loadMode === 'light' ? 512 : 1024,
+    );
+    terrain = new Terrain(scene, terrainMat);
+  }
   airports = null;
   rocks = null;
   forest = null;
   grass = null;
   town = null;
   life = null;
-  progress(0.4, 'Building the Skyhawk — skin, rivets, fasteners, cabin…');
+  const aircraftType = readSetup().aircraftType;
+  sim.fdm.setAircraft(aircraftType === 'C152' ? C152 : C172);
+  progress(0.52, `Building the ${aircraftType === 'C152' ? 'Cessna 152' : 'Skyhawk'} — skin, rivets, fasteners, cabin…`);
   sim.panel = new Panel();
-  aircraft = await buildAircraft({ envMap: null, panelCanvas: sim.panel.canvas, reg: 'N172SP', scheme: 0, interior: true, lights: true });
+  aircraft = await buildAircraft({ envMap: null, panelCanvas: sim.panel.canvas, reg: aircraftType === 'C152' ? 'N152AB' : 'N172SP', scheme: aircraftType === 'C152' ? 1 : 0, interior: true, lights: true, aircraftType });
   aircraft.traverse((o) => { if (o.isMesh) o.receiveShadow = true; });
   scene.add(aircraft);
   sim.panel.buildHotspots(sim);
-  progress(0.58, 'World scene ready…');
-  sim.life = null;
+  progress(0.58, 'Building airports, runways and taxiways…');
+  airports = await buildAirports(
+    scene,
+    null,
+    buildAircraft,
+    cesiumViewer ? getCesiumElevationWorld : null,
+  );
+  progress(0.66, 'Building airport terminals and hangars…');
+  applySetup(readSetup(), true);
+  sim.ready = true;
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+
+  if (!useLocalScenery) {
+    progress(0.72, 'Using real-world terrain, roads and buildings…');
+    progress(0.80, 'Loading real-world 3D scenery…');
+    progress(0.86, 'Using live aerial road and city detail…');
+  } else {
+    if (loadMode === 'light') {
+      progress(0.72, 'Loading lightweight airport surroundings…');
+      progress(0.80, 'Using local terrain…');
+      progress(0.86, 'Using reduced scenery detail…');
+    } else {
+      const worldQuality = 0.8;
+      rocks = new RockField(scene);
+      await rocks.init(worldQuality);
+      progress(0.72, 'Loading rocks and airport surroundings…');
+
+      forest = new Forest(scene, renderer);
+      await forest.init(worldQuality);
+      progress(0.80, 'Growing scenery…');
+
+      grass = new GrassField(scene);
+      await grass.init(worldQuality);
+      progress(0.86, 'Building towns and roads…');
+
+      town = await buildTown(scene);
+    }
+  }
+  progress(0.92, 'Adding vehicles and airport activity…');
+  if (loadMode !== 'light') {
+    life = await buildLife(scene);
+    sim.life = life;
+  }
+
+  progress(0.95, 'World scene ready…');
   mmap = new MovingMap(); sim.mmap = mmap;
   progress(0.95, 'Charts…');
-  while (!mmap.build(40)) await new Promise((r) => setTimeout(r, 0));
   progress(1, 'Ready');
-  // warm everything once at default spawn so the first frame is complete
-  applySetup(readSetup(), true);
+  await new Promise((resolve) => requestAnimationFrame(resolve));
   $('loading').classList.add('hidden');
-  $('setup').classList.remove('hidden');
-  sim.ready = true;
+  $('loadChoice').classList.add('hidden');
+  $('setup').classList.add('hidden');
+  $('fly').disabled = false;
+  $('fly').click();
 }
 
 function chooseLoadMode(mode) {
   loadMode = mode;
   $('loadChoice').classList.add('hidden');
   $('loading').classList.remove('hidden');
+  $('setup').classList.add('hidden');
+  $('fly').disabled = true;
   if (mode === 'light') $('quality').value = 'lite';
-  init().catch((e) => { console.error(e); loadText.textContent = 'Failed to load: ' + e.message; });
+  init().catch((error) => {
+    console.error(error);
+    const message = error instanceof Error
+      ? error.message
+      : (typeof error === 'string' && error
+        ? error
+        : error?.message || error?.reason?.message || 'Unknown loading error');
+    loadText.textContent = 'Failed to load: ' + message;
+    $('loading').classList.add('hidden');
+    $('setup').classList.add('hidden');
+    $('loadChoice').classList.remove('hidden');
+  });
 }
-$('loadLight').addEventListener('click', () => chooseLoadMode('light'));
-$('loadHeavy').addEventListener('click', () => chooseLoadMode('heavy'));
+window.chooseLoadMode = chooseLoadMode;
+window.startEdition = chooseLoadMode;
+const aircraftTypeSelect = $('aircraftType');
+aircraftTypeSelect.addEventListener('change', () => {
+  const c152 = aircraftTypeSelect.value === 'C152';
+  $('aircraftTitle').textContent = c152 ? 'AEROBAT' : 'SKYHAWK';
+  $('aircraftSubtitle').textContent = c152
+    ? 'Cessna 152 · 110 hp trainer · San Francisco Bay Area'
+    : 'Cessna 172S · 180 hp trainer · San Francisco Bay Area';
+});
 
 // ---------------- setup / spawn ----------------
 function readSetup() {
   return {
-    spawn: $('spawn').value, tod: +$('tod').value, windDir: +$('wdir').value, windKt: +$('wspd').value, turb: +$('turb').value,
+    aircraftType: $('aircraftType').value, spawn: $('spawn').value, tod: +$('tod').value, windDir: +$('wdir').value, windKt: +$('wspd').value, turb: +$('turb').value,
     cover: +$('clouds').value, baseFt: +$('cbase').value, visKm: +$('vis').value, qnhInHg: +$('qnh').value, isa: +$('isa').value, fuel: +$('fuel').value, quality: $('quality').value,
+    atcEnabled: $('atcEnabled').checked, aiTraffic: $('aiTraffic').checked,
+    failureScenario: $('failureScenario').value, triggerFailureAtStart: $('triggerFailureAtStart').checked,
   };
 }
 function bindOutputs() {
@@ -114,12 +231,29 @@ function bindOutputs() {
 }
 bindOutputs();
 
+function syncFuelControl() {
+  const fuel = $('fuel');
+  const profile = $('aircraftType').value === 'C152' ? C152 : C172;
+  const maxPerTank = Math.floor(profile.fuelCapGal);
+  fuel.max = String(maxPerTank);
+  if (+fuel.value > maxPerTank) fuel.value = String(maxPerTank);
+  $('fuelOut').textContent = fuel.value + ' gal';
+}
+$('aircraftType').addEventListener('change', syncFuelControl);
+syncFuelControl();
+
 function airport(icao) { return AIRPORTS.find((a) => a.icao === icao); }
 let lastSetup = null;
 
 function applySetup(s, warmOnly = false) {
   lastSetup = s;
+  sim.groundServices = { active: false, airport: null };
+  sim.fdm.setAircraft(s.aircraftType === 'C152' ? C152 : C172);
   sim.atc.reset(s);
+  sim.atc.enabled = s.atcEnabled !== false;
+  sim.atc.trafficEnabled = s.aiTraffic !== false;
+  sim.aiTrafficEnabled = s.aiTraffic !== false;
+  if (life) life.setTrafficEnabled(sim.aiTrafficEnabled);
   sim.av.com1.active = sim.atc.frequency;
   const F = sim.fdm;
   sim.weather = { windDir: s.windDir, windKt: s.windKt, turb: s.turb, cover: s.cover, baseFt: s.baseFt, visKm: s.visKm, qnhInHg: s.qnhInHg, isa: s.isa };
@@ -152,11 +286,20 @@ function applySetup(s, warmOnly = false) {
     case 'cruise': { pos = { x: -6000, z: 9000 }; hdg = 75; onGround = false; speed = 108; alt = 5500 * FT; pitch = 1.5; break; }
     default: { const r = rwyStart(airport('KSFO'), 1); pos = r.p; hdg = r.hdg; }
   }
-  const gh = heightAt(pos.x, pos.z);
+  const localGh = heightAt(pos.x, pos.z);
+  const cesiumGh = getCesiumElevationWorld(pos.x, pos.z);
+  const gh = Number.isFinite(cesiumGh) ? cesiumGh : localGh;
+  warmCesiumTerrain(pos.x, pos.z);
   F.env.qnh = s.qnhInHg * INHG; F.env.isaDev = s.isa; F.env.turbulence = s.turb;
   F.reset({ pos: [pos.x, onGround ? gh + 1.25 : alt, pos.z], hdg, speedKt: speed, onGround, coldDark: cold, pitch });
+  F.resetFailures();
+  showFailure(null);
+  sim.activeFailure = null;
+  sim.failurePending = !warmOnly && s.triggerFailureAtStart && s.failureScenario !== 'none' ? s.failureScenario : null;
+  sim.failureDelay = 3;
   F.ctrl.flaps = flapsInit;
-  F.sys.fuelL = F.sys.fuelR = s.fuel;
+  const requestedFuel = Math.max(0, Math.min(Number(s.fuel) || 0, F.aircraft.fuelCapGal));
+  F.sys.fuelL = F.sys.fuelR = requestedFuel;
   if (!cold && sim.night > 0.25) { F.sys.panelLights = true; F.sys.nav = true; }
   F.kollsman = cold ? 29.92 : Math.round(s.qnhInHg * 100) / 100;
   if (!onGround) { F.ctrl.throttle = s.spawn === 'ILS28' ? 0.5 : 0.72; F.ctrl.trim = s.spawn === 'ILS28' ? 0.2 : 0.05; F.ctrl.parkBrake = false; F.eng.rpm = 2300; F.eng.propOmega = 2300 * Math.PI / 30; }
@@ -178,7 +321,7 @@ function applySetup(s, warmOnly = false) {
   if (town) town.setNight(sim.night);
   if (life) life.setNight(sim.night);
   aircraft.userData.night = sim.night;
-  mmap.track = [];
+  if (mmap) mmap.track = [];
   sim.crashShown = false; sim.lastTD = null; sim.airTime = 0;
   sim.view = sim.view === 'walk' ? 'cockpit' : sim.view;
   look.yaw = 0; look.pitch = -10; camera.fov = 58;
@@ -205,6 +348,66 @@ const ctrlState = { elev: 0, ail: 0, rud: 0 };
 const views = ['cockpit', 'cabin', 'orbit', 'chase', 'tower', 'flyby', 'walk'];
 const viewNames = { cockpit: 'COCKPIT', cabin: 'CABIN — WALK (WASD)', orbit: 'EXTERNAL ORBIT', chase: 'CHASE', tower: 'TOWER', flyby: 'FLY-BY', walk: 'WALKAROUND (WASD)' };
 
+const FAILURE_SCENARIOS = {
+  engine: {
+    title: 'Engine failure',
+    steps: ['Airspeed — establish best glide: 68 kt', 'Best field — plan for landing', 'Fuel selector — BOTH', 'Fuel pump — ON', 'Mixture — RICH', 'Ignition — BOTH, then START if needed', 'Electrical load — reduce', 'Declare mayday / contact ATC', 'Proceed to landing field'],
+  },
+  alternator: {
+    title: 'Alternator failure',
+    steps: ['Verify alternator indication and low-voltage annunciator', 'Reduce electrical load', 'Check and reset the alternator field circuit breaker once', 'If voltage remains low, alternator switch — OFF', 'Conserve battery for essential instruments and communications', 'Terminate flight and land as soon as practical'],
+  },
+  vacuum: {
+    title: 'Vacuum system failure',
+    steps: ['Confirm attitude and heading indicators are unreliable', 'Cross-check magnetic compass and turn coordinator', 'Avoid instrument turns until a reliable attitude reference is available', 'Reduce pilot workload and use outside visual cues', 'If in instrument conditions, declare a problem and request assistance', 'Land as soon as practical'],
+  },
+  fuel: {
+    title: 'Fuel starvation',
+    steps: ['Airspeed — establish best glide: 68 kt', 'Fuel selector — switch to the fullest tank / BOTH', 'Electric fuel pump — ON', 'Mixture — RICH', 'Ignition — BOTH', 'Attempt engine restart; if unsuccessful, secure mixture and ignition', 'Plan a forced landing'],
+  },
+};
+
+function toggleFailurePanel(force) {
+  const panel = $('failurePanel');
+  panel.classList.toggle('hidden', !(force ?? panel.classList.contains('hidden')));
+}
+
+function showFailure(type) {
+  sim.activeFailure = type;
+  const scenario = FAILURE_SCENARIOS[type];
+  $('failureChip').classList.toggle('hidden', !scenario);
+  $('failureChip').textContent = scenario ? `FAILURE: ${scenario.title.toUpperCase()}` : 'FAILURE: NONE';
+  $('failureTitle').textContent = scenario?.title || 'No failure active';
+  $('failureSteps').replaceChildren(...(scenario?.steps || ['No active failure.']).map((step) => {
+    const li = document.createElement('li');
+    li.textContent = step;
+    return li;
+  }));
+}
+
+function triggerFailure(type) {
+  if (!type || type === 'none') return;
+  sim.fdm.triggerFailure(type);
+  showFailure(type);
+  toggleFailurePanel(true);
+  const title = FAILURE_SCENARIOS[type]?.title || 'Failure';
+  toast(`${title} simulated`, 3500);
+  sim.panelDirty = true;
+}
+
+function clearFailure() {
+  sim.fdm.resetFailures();
+  if (sim.activeFailure === 'fuel') {
+    sim.fdm.sys.fuelSel = 'BOTH';
+    sim.fdm.sys.fuelL = sim.fdm.aircraft.fuelCapGal;
+    sim.fdm.sys.fuelR = sim.fdm.aircraft.fuelCapGal;
+  }
+  showFailure(null);
+  toggleFailurePanel(false);
+  toast('Failure state reset', 1800);
+  sim.panelDirty = true;
+}
+
 function toast(msg, ms = 1800) { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('on'), ms); }
 
 window.addEventListener('keydown', (e) => {
@@ -218,9 +421,36 @@ window.addEventListener('keydown', (e) => {
   const sh = e.shiftKey;
   switch (e.code) {
     case 'Escape': if (!$('help').classList.contains('hidden')) { $('help').classList.add('hidden'); break; } if (!$('mapWrap').classList.contains('hidden')) { toggleMap(false); break; } togglePause(); if (sim.paused) showMenu(true); break;
-    case 'KeyF': if (!walkView()) { F.ctrl.flaps = Math.min(3, F.ctrl.flaps + 1); toast('Flaps ' + ['UP', '10°', '20°', 'FULL'][F.ctrl.flaps]); } break;
+    case 'KeyF':
+      if (sh) toggleFailurePanel();
+      else if (!walkView()) { F.ctrl.flaps = Math.min(3, F.ctrl.flaps + 1); toast('Flaps ' + ['UP', '10°', '20°', 'FULL'][F.ctrl.flaps]); }
+      break;
     case 'KeyV': if (sh) { S.avionics = !S.avionics; toast('Avionics ' + (S.avionics ? 'ON' : 'OFF')); } else { F.ctrl.flaps = Math.max(0, F.ctrl.flaps - 1); toast('Flaps ' + ['UP', '10°', '20°', 'FULL'][F.ctrl.flaps]); } break;
     case 'KeyP': F.ctrl.parkBrake = !F.ctrl.parkBrake; toast('Parking brake ' + (F.ctrl.parkBrake ? 'SET' : 'RELEASED')); break;
+    case 'KeyJ':
+      if (walkView()) break;
+      {
+        let nearest = null, nearestDistance = Infinity;
+        for (const a of AIRPORTS) {
+          const distance = Math.hypot(a.x - F.pos[0], a.z - F.pos[2]);
+          if (distance < nearestDistance) { nearestDistance = distance; nearest = a; }
+        }
+        if (nearestDistance >= 300) {
+          toast('No ground service stand nearby', 3000);
+        } else if (!F.onGround || Math.hypot(F.vel[0], F.vel[2]) >= 1) {
+          toast('Ground services require the aircraft stopped on the ground', 3000);
+        } else if (sh) {
+          sim.groundServices = { active: false, airport: null };
+          F.ctrl.parkBrake = false;
+          toast(`${nearest.icao} ground services disconnected`, 3000);
+        } else {
+          sim.groundServices = { active: true, airport: nearest.icao };
+          F.ctrl.parkBrake = true;
+          S.avionics = true;
+          toast(`${nearest.icao} ground services: GPU, baggage, stairs, catering and tug ready`, 4000);
+        }
+      }
+      break;
     case 'KeyI': if (sh) S.mags = Math.max(0, S.mags - 1); else { S.mags = Math.min(4, S.mags + 1); if (S.mags === 4) sim.startHeld = 0.25; } toast('Ignition ' + ['OFF', 'R', 'L', 'BOTH', 'START'][S.mags], 900); break;
     case 'KeyM': if (sh) { const on = !(S.master && S.alternator); S.master = on; S.alternator = on; toast('Master ' + (on ? 'ON' : 'OFF')); } else toggleMap(); break;
     case 'KeyE': if (sh) autoStart(); break;
@@ -231,7 +461,27 @@ window.addEventListener('keydown', (e) => {
     case 'KeyA': if (!walkView() && !sh) { av.apButton('AP', F); toast(av.ap.on ? 'Autopilot ENGAGED (ROL/VS)' : 'Autopilot DISCONNECTED'); } else if (sh && !walkView()) { /* reserved */ } break;
     case 'KeyH': if (sh) { av.apButton('HDG', F); toast('AP ' + av.ap.lat); } break;
     case 'KeyN': if (sh) { av.apButton('NAV', F); toast('AP ' + av.ap.lat); } else { $('mini').classList.toggle('hidden'); } break;
-    case 'KeyR': if (sh) { av.apButton('APR', F); toast('AP ' + av.ap.lat + (av.ap.gsArmed ? ' (GS armed)' : '')); } break;
+    case 'KeyR':
+      if (sh) { av.apButton('APR', F); toast('AP ' + av.ap.lat + (av.ap.gsArmed ? ' (GS armed)' : '')); }
+      else if (walkView()) {}
+      else {
+        let nearest = null, nearestDistance = Infinity;
+        for (const a of AIRPORTS) {
+          const distance = Math.hypot(a.x - F.pos[0], a.z - F.pos[2]);
+          if (distance < nearestDistance) { nearestDistance = distance; nearest = a; }
+        }
+        if (F.onGround && nearestDistance < 300 && Math.hypot(F.vel[0], F.vel[2]) < 1) {
+          const capacity = F.aircraft.fuelCapGal;
+          const before = S.fuelL + S.fuelR;
+          S.fuelL = capacity; S.fuelR = capacity;
+          const added = Math.max(0, capacity * 2 - before);
+          toast(`Ground fuel service · ${nearest.icao} · +${added.toFixed(1)} gal (${(capacity * 2).toFixed(1)} gal total)`, 3000);
+          sim.panelDirty = true;
+        } else {
+          toast(nearestDistance < 300 ? 'Refuel only while stopped on the ground' : 'No ground fuel service nearby', 3000);
+        }
+      }
+      break;
     case 'KeyT': if (sh) { av.apButton('ALT', F); toast('AP ' + av.ap.vert); } break;
     case 'KeyY': mouse.yoke = !mouse.yoke; $('yokeChip').classList.toggle('hidden', !mouse.yoke); $('cross').classList.toggle('hidden', !mouse.yoke); toast(mouse.yoke ? 'Mouse yoke ON — mouse position = yoke' : 'Mouse yoke OFF'); break;
     case 'KeyG': toggleATC(); break;
@@ -539,6 +789,10 @@ function updateTip() {
 }
 
 function toggleATC(force) {
+  if (!sim.atc.enabled) {
+    toast('ATC communications are disabled in setup');
+    return;
+  }
   const panel = $('atcPanel');
   const on = force ?? panel.classList.contains('hidden');
   panel.classList.toggle('hidden', !on);
@@ -565,6 +819,10 @@ function updateATCPanel() {
 }
 
 $('atcClose').onclick = () => toggleATC(false);
+$('failureChip').onclick = () => toggleFailurePanel();
+$('failureClose').onclick = () => toggleFailurePanel(false);
+$('triggerFailure').onclick = () => triggerFailure(sim.activeFailure || readSetup().failureScenario);
+$('clearFailure').onclick = clearFailure;
 
 // ---------------- map UI ----------------
 const mapC = $('map'), miniC = $('mini');
@@ -650,6 +908,14 @@ function frame(dtReal) {
   const dt = Math.min(0.05, dtReal);
   if (sim.started && !sim.paused) {
     updateControls(dt);
+    if (sim.failurePending) {
+      sim.failureDelay -= dt * sim.simRate;
+      if (sim.failureDelay <= 0) {
+        const type = sim.failurePending;
+        sim.failurePending = null;
+        triggerFailure(type);
+      }
+    }
     // wind with gusts
     const gust = sim.weather.turb * 0.25 * (Math.sin(simT * 0.7) * 0.5 + Math.sin(simT * 1.9 + 1) * 0.3 + Math.sin(simT * 0.23) * 0.2);
     F.env.gustFactor = gust;
