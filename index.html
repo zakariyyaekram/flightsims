@@ -1,187 +1,1122 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#07111f">
-  <title>Flight Simulator Hangar</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SkyRunner Pro – Flight Sim with ATC & Ground Services</title>
   <style>
-    :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; }
-    * { box-sizing: border-box; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      margin: 0;
-      min-height: 100vh;
-      color: #edf6ff;
-      background:
-        radial-gradient(circle at 18% 12%, rgba(34, 112, 177, 0.28), transparent 28rem),
-        radial-gradient(circle at 82% 82%, rgba(14, 165, 233, 0.14), transparent 30rem),
-        linear-gradient(135deg, #050a12 0%, #0a1727 58%, #07111f 100%);
+      overflow: hidden;
+      background: #000;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      color: #e0e0e0;
     }
-    body::before {
-      content: "";
-      position: fixed;
-      inset: 0;
+    #canvas-container {
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+    }
+    canvas { display: block; }
+
+    /* HUD */
+    #hud {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
       pointer-events: none;
-      opacity: 0.16;
-      background-image:
-        linear-gradient(rgba(148, 163, 184, 0.12) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(148, 163, 184, 0.12) 1px, transparent 1px);
-      background-size: 48px 48px;
+      z-index: 10;
     }
-    main {
-      position: relative;
-      width: min(1120px, calc(100% - 32px));
-      margin: 0 auto;
-      padding: 7vh 0;
+    .hud-panel {
+      position: absolute;
+      background: rgba(0, 20, 40, 0.75);
+      border: 1px solid rgba(0, 180, 255, 0.4);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 13px;
+      backdrop-filter: blur(6px);
+      box-shadow: 0 0 12px rgba(0, 150, 255, 0.15);
     }
-    .eyebrow {
-      margin: 0 0 10px;
-      color: #67c7ff;
+    #instruments {
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 24px;
+      min-width: 480px;
+      justify-content: center;
+    }
+    .inst {
+      text-align: center;
+      min-width: 80px;
+    }
+    .inst .label { font-size: 10px; color: #7ab; letter-spacing: 1px; text-transform: uppercase; }
+    .inst .value { font-size: 22px; font-weight: 600; color: #0cf; font-variant-numeric: tabular-nums; }
+    .inst .unit { font-size: 11px; color: #8ab; }
+
+    #status-bar {
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      padding: 8px 18px;
+    }
+    .phase {
+      background: rgba(0, 100, 180, 0.5);
+      padding: 3px 10px;
+      border-radius: 4px;
       font-size: 12px;
-      font-weight: 800;
-      letter-spacing: 0.22em;
-      text-transform: uppercase;
+      font-weight: 600;
+      letter-spacing: 0.5px;
     }
-    h1 {
-      margin: 0;
-      max-width: 760px;
-      font-size: clamp(42px, 7vw, 76px);
-      line-height: 0.95;
-      letter-spacing: -0.055em;
+    .phase.ground { background: rgba(80, 120, 40, 0.6); }
+    .phase.taxi { background: rgba(180, 120, 0, 0.6); }
+    .phase.airborne { background: rgba(0, 100, 180, 0.6); }
+    .phase.approach { background: rgba(180, 60, 0, 0.6); }
+
+    /* Side panels */
+    #left-panel, #right-panel {
+      position: absolute;
+      top: 60px;
+      width: 280px;
+      max-height: calc(100vh - 160px);
+      overflow-y: auto;
+      pointer-events: auto;
+      z-index: 20;
     }
-    .intro {
-      max-width: 620px;
-      margin: 20px 0 34px;
-      color: #aebed0;
-      font-size: 18px;
-      line-height: 1.6;
+    #left-panel { left: 12px; }
+    #right-panel { right: 12px; }
+
+    .panel-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #0cf;
+      margin-bottom: 10px;
+      letter-spacing: 1px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
-    .simulators {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 18px;
+    .panel-title::before {
+      content: '';
+      width: 4px;
+      height: 16px;
+      background: #0cf;
+      border-radius: 2px;
     }
-    .sim-card {
-      position: relative;
-      min-height: 390px;
+
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 8px 12px;
+      margin: 5px 0;
+      background: rgba(0, 80, 140, 0.5);
+      border: 1px solid rgba(0, 180, 255, 0.35);
+      border-radius: 6px;
+      color: #e0f0ff;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+      text-align: left;
+    }
+    .btn:hover {
+      background: rgba(0, 120, 200, 0.7);
+      border-color: #0cf;
+    }
+    .btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .btn.active {
+      background: rgba(0, 160, 100, 0.5);
+      border-color: #0c8;
+    }
+    .btn.danger {
+      background: rgba(140, 40, 20, 0.5);
+      border-color: rgba(255, 100, 60, 0.4);
+    }
+    .btn.danger:hover {
+      background: rgba(180, 50, 20, 0.7);
+    }
+
+    .section {
+      margin-bottom: 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(0, 120, 180, 0.25);
+    }
+    .section:last-child { border-bottom: none; }
+
+    .freq {
+      font-family: monospace;
+      font-size: 13px;
+      color: #0f8;
+      margin-left: 6px;
+    }
+
+    #radio-log {
+      background: rgba(0, 10, 20, 0.8);
+      border: 1px solid rgba(0, 100, 150, 0.4);
+      border-radius: 6px;
+      padding: 8px;
+      height: 160px;
+      overflow-y: auto;
+      font-size: 11px;
+      font-family: 'Consolas', monospace;
+      line-height: 1.4;
+      margin-top: 8px;
+    }
+    .msg-atc { color: #6cf; }
+    .msg-pilot { color: #8f8; }
+    .msg-sys { color: #aaa; }
+
+    .status-item {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      margin: 4px 0;
+    }
+    .status-ok { color: #0c8; }
+    .status-warn { color: #fc0; }
+    .status-off { color: #888; }
+
+    #controls-help {
+      position: absolute;
+      bottom: 90px;
+      left: 12px;
+      font-size: 11px;
+      color: #789;
+      background: rgba(0,0,0,0.5);
+      padding: 8px 12px;
+      border-radius: 6px;
+      line-height: 1.5;
+      pointer-events: none;
+    }
+
+    #loading {
+      position: absolute;
+      inset: 0;
+      background: #050a12;
       display: flex;
       flex-direction: column;
-      justify-content: flex-end;
-      overflow: hidden;
-      padding: 28px;
-      border: 1px solid rgba(148, 196, 224, 0.22);
-      border-radius: 22px;
-      color: inherit;
-      text-decoration: none;
-      background: rgba(8, 18, 31, 0.78);
-      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
-      transition: transform 180ms ease, border-color 180ms ease;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      transition: opacity 0.5s;
     }
-    .sim-card:hover {
-      transform: translateY(-5px);
-      border-color: rgba(103, 199, 255, 0.7);
+    #loading h1 {
+      font-size: 28px;
+      color: #0cf;
+      margin-bottom: 8px;
+      letter-spacing: 2px;
     }
-    .sim-card:focus-visible { outline: 3px solid #67c7ff; outline-offset: 4px; }
-    .sim-card::before {
-      content: "";
+    #loading p { color: #789; font-size: 14px; }
+
+    .toggle-panel {
       position: absolute;
-      inset: 0;
-      background: linear-gradient(to top, rgba(4, 10, 18, 0.98) 5%, rgba(4, 10, 18, 0.08) 72%);
-      z-index: 1;
+      top: 12px;
+      width: 36px;
+      height: 36px;
+      background: rgba(0, 40, 80, 0.7);
+      border: 1px solid rgba(0, 150, 255, 0.4);
+      border-radius: 6px;
+      color: #0cf;
+      font-size: 18px;
+      cursor: pointer;
+      z-index: 30;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
-    .dreamliner {
-      background: radial-gradient(ellipse at 68% 25%, rgba(183, 224, 255, 0.52), transparent 16rem),
-        linear-gradient(155deg, #65a8cf 0%, #204b70 48%, #091724 100%);
-    }
-    .skyhawk {
-      background: radial-gradient(ellipse at 74% 30%, rgba(242, 163, 58, 0.34), transparent 14rem),
-        linear-gradient(155deg, #78a4bd 0%, #344e62 48%, #18232e 100%);
-    }
-    .triple-seven {
-      background: radial-gradient(ellipse at 68% 25%, rgba(74, 222, 128, 0.28), transparent 16rem),
-        linear-gradient(155deg, #455c4e 0%, #18342a 48%, #071511 100%);
-    }
-    .silhouette {
+    #toggle-left { left: 12px; }
+    #toggle-right { right: 12px; }
+
+    #rating-panel {
       position: absolute;
-      z-index: 1;
-      width: 72%;
-      height: 44%;
-      top: 13%;
-      left: 14%;
-      opacity: 0.82;
-      filter: drop-shadow(0 16px 18px rgba(0, 0, 0, 0.42));
+      right: 12px;
+      bottom: 12px;
+      width: 280px;
+      pointer-events: auto;
+      z-index: 25;
     }
-    .card-copy { position: relative; z-index: 2; }
-    .tail {
-      display: block;
-      margin-bottom: 7px;
-      color: #94d7ff;
-      font-size: 11px;
-      font-weight: 800;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
+    #rating-panel .stars {
+      display: flex;
+      gap: 6px;
+      margin: 8px 0;
     }
-    h2 {
-      margin: 0 0 7px;
-      font-size: clamp(24px, 3vw, 34px);
-      letter-spacing: -0.035em;
+    .star {
+      width: 42px;
+      height: 42px;
+      border: 1px solid rgba(0, 180, 255, 0.35);
+      border-radius: 6px;
+      background: rgba(0, 50, 90, 0.55);
+      color: #789;
+      font-size: 24px;
+      cursor: pointer;
     }
-    .card-copy p { margin: 0 0 18px; color: #bac9d8; line-height: 1.45; }
-    .launch { color: #fff; font-size: 13px; font-weight: 800; text-transform: uppercase; }
-    .launch::after { content: " →"; color: #67c7ff; font-size: 20px; }
-    @media (max-width: 900px) {
-      main { padding: 42px 0; }
-      .simulators { grid-template-columns: 1fr; }
-      .sim-card { min-height: 330px; }
+    .star:hover,
+    .star.active {
+      color: #ffd166;
+      border-color: #ffd166;
+      background: rgba(120, 90, 20, 0.45);
     }
+    #rating-summary {
+      color: #aabbd0;
+      font-size: 12px;
+      min-height: 18px;
+    }
+    #rating-submit { margin-top: 8px; text-align: center; }
   </style>
 </head>
 <body>
-  <main>
-    <p class="eyebrow">Flight Operations</p>
-    <h1>Choose your aircraft.</h1>
-    <p class="intro">Enter the hangar and launch one of three detailed flight simulators.</p>
+  <div id="loading">
+    <h1>SKYRUNNER PRO</h1>
+    <p>Loading flight systems, ATC & ground services…</p>
+  </div>
 
-    <nav class="simulators" aria-label="Flight simulators">
-      <a class="sim-card dreamliner" href="./boeing787.html">
-        <svg class="silhouette" viewBox="0 0 800 360" aria-hidden="true">
-          <path fill="#dceaf3" d="M50 205l290-49 355-73-31 28-324 112-285 6z"/>
-          <path fill="#aebdcc" d="M340 156l-54 155 31 7 90-152z"/>
-        </svg>
-        <div class="card-copy">
-          <span class="tail">B787-9 • Widebody</span>
-          <h2>AeroSim X-787XP Pro</h2>
-          <p>Advanced systems, approach instruments, living terrain, and multiple cockpit views.</p>
-          <span class="launch">Launch Boeing 787-9</span>
-        </div>
-      </a>
+  <div id="canvas-container">
+    <div id="hud">
+      <div id="status-bar" class="hud-panel">
+        <span class="phase ground" id="flight-phase">ON GROUND</span>
+        <span id="callsign">N172SP</span>
+        <span id="airport-info">KISM • Kissimmee Gateway</span>
+      </div>
 
-      <a class="sim-card skyhawk" href="./skyhawk.html">
-        <svg class="silhouette" viewBox="0 0 800 360" aria-hidden="true">
-          <path fill="#e8edf0" d="M55 201l275-48 390-85-76 55-315 96-274 4z"/>
-          <path fill="#c8d1d5" d="M344 168l-35 136 26 5 68-141z"/>
-        </svg>
-        <div class="card-copy">
-          <span class="tail">C172S • Trainer</span>
-          <h2>Skyhawk</h2>
-          <p>Cessna 172S flight model, steam gauges, avionics, weather, and flight procedures.</p>
-          <span class="launch">Launch Cessna 172S</span>
+      <div id="instruments" class="hud-panel">
+        <div class="inst">
+          <div class="label">Airspeed</div>
+          <div class="value" id="spd">0</div>
+          <div class="unit">kts</div>
         </div>
-      </a>
+        <div class="inst">
+          <div class="label">Altitude</div>
+          <div class="value" id="alt">0</div>
+          <div class="unit">ft</div>
+        </div>
+        <div class="inst">
+          <div class="label">Heading</div>
+          <div class="value" id="hdg">270</div>
+          <div class="unit">°</div>
+        </div>
+        <div class="inst">
+          <div class="label">Vertical</div>
+          <div class="value" id="vs">0</div>
+          <div class="unit">fpm</div>
+        </div>
+        <div class="inst">
+          <div class="label">Throttle</div>
+          <div class="value" id="thr">0</div>
+          <div class="unit">%</div>
+        </div>
+      </div>
+    </div>
 
-      <a class="sim-card triple-seven" href="./boeing777.html">
-        <svg class="silhouette" viewBox="0 0 800 360" aria-hidden="true">
-          <path fill="#dce8df" d="M35 205l320-51 400-78-42 29-358 115-320 5z"/>
-          <path fill="#b9c9bf" d="M360 154l-62 162 34 7 96-162z"/>
-        </svg>
-        <div class="card-copy">
-          <span class="tail">B777 • Widebody</span>
-          <h2>Boeing 777</h2>
-          <p>Interactive flight model, PBR terrain, navigation map, and multiple views.</p>
-          <span class="launch">Launch Boeing 777</span>
+    <button class="toggle-panel" id="toggle-left" title="Toggle Ground Services">⛽</button>
+    <button class="toggle-panel" id="toggle-right" title="Toggle ATC">📻</button>
+
+    <!-- Ground Services Panel -->
+    <div id="left-panel" class="hud-panel">
+      <div class="panel-title">GROUND SERVICES</div>
+
+      <div class="section">
+        <div class="status-item"><span>Fuel</span><span id="fuel-status" class="status-ok">100%</span></div>
+        <div class="status-item"><span>GPU</span><span id="gpu-status" class="status-off">Disconnected</span></div>
+        <div class="status-item"><span>Stairs</span><span id="stairs-status" class="status-off">Retracted</span></div>
+        <div class="status-item"><span>Pushback</span><span id="push-status" class="status-off">Not connected</span></div>
+        <div class="status-item"><span>Doors</span><span id="doors-status" class="status-ok">Closed</span></div>
+      </div>
+
+      <div class="section">
+        <button class="btn" id="btn-fuel">Request Fuel Truck</button>
+        <button class="btn" id="btn-gpu">Connect GPU</button>
+        <button class="btn" id="btn-stairs">Request Stairs</button>
+        <button class="btn" id="btn-push">Request Pushback</button>
+        <button class="btn danger" id="btn-engines">Start Engines</button>
+      </div>
+
+      <div class="section">
+        <div style="font-size:11px;color:#8ab;margin-bottom:6px;">QUICK ACTIONS</div>
+        <button class="btn" id="btn-ready">Ready for Departure</button>
+      </div>
+    </div>
+
+    <!-- ATC Panel -->
+    <div id="right-panel" class="hud-panel">
+      <div class="panel-title">ATC RADIO</div>
+
+      <div class="section">
+        <div style="font-size:12px;margin-bottom:6px;">
+          Active: <span id="active-freq" class="freq">121.900 Ground</span>
         </div>
-      </a>
-    </nav>
-  </main>
+        <button class="btn" data-freq="ground">Ground <span class="freq">121.900</span></button>
+        <button class="btn" data-freq="tower">Tower <span class="freq">118.700</span></button>
+        <button class="btn" data-freq="approach">Approach <span class="freq">119.400</span></button>
+      </div>
+
+      <div class="section">
+        <div style="font-size:11px;color:#8ab;margin-bottom:6px;">REQUESTS</div>
+        <button class="btn" id="req-taxi">Request Taxi Clearance</button>
+        <button class="btn" id="req-takeoff">Request Takeoff Clearance</button>
+        <button class="btn" id="req-landing">Request Landing Clearance</button>
+        <button class="btn" id="req-freq-change">Request Frequency Change</button>
+      </div>
+
+      <div class="section">
+        <div style="font-size:11px;color:#8ab;">RADIO LOG</div>
+        <div id="radio-log"></div>
+      </div>
+    </div>
+
+    <div id="controls-help">
+      <strong>CONTROLS</strong><br>
+      W/S or ↑↓ — Pitch &nbsp;|&nbsp; A/D or ←→ — Roll<br>
+      Q/E — Yaw &nbsp;|&nbsp; Shift/Ctrl — Throttle<br>
+      G — Gear &nbsp;|&nbsp; B — Brakes &nbsp;|&nbsp; C — Camera<br>
+      Space — Full Stop (on ground)
+    </div>
+
+    <div id="rating-panel" class="hud-panel">
+      <div class="panel-title">RATE THIS FLIGHT SIM</div>
+      <div class="stars" role="radiogroup" aria-label="Rating out of 5 stars">
+        <button class="star" type="button" role="radio" aria-label="1 star" data-rating="1">★</button>
+        <button class="star" type="button" role="radio" aria-label="2 stars" data-rating="2">★</button>
+        <button class="star" type="button" role="radio" aria-label="3 stars" data-rating="3">★</button>
+        <button class="star" type="button" role="radio" aria-label="4 stars" data-rating="4">★</button>
+        <button class="star" type="button" role="radio" aria-label="5 stars" data-rating="5">★</button>
+      </div>
+      <div id="rating-summary">Select a rating</div>
+      <button class="btn" id="rating-submit" type="button" disabled>Submit Rating</button>
+    </div>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // ========== STATE ==========
+    const state = {
+      phase: 'ground', // ground | taxi | airborne | approach
+      throttle: 0,
+      speed: 0,          // knots
+      altitude: 0,       // feet
+      heading: 270,      // degrees
+      pitch: 0,
+      roll: 0,
+      yawRate: 0,
+      verticalSpeed: 0,
+      gearDown: true,
+      brakes: true,
+      enginesRunning: false,
+      fuel: 100,
+      gpuConnected: false,
+      stairsExtended: false,
+      pushbackConnected: false,
+      doorsOpen: false,
+      taxiClearance: false,
+      takeoffClearance: false,
+      landingClearance: false,
+      activeFreq: 'ground',
+      cameraMode: 0, // 0 chase, 1 cockpit, 2 free
+      onRunway: false,
+      airborne: false
+    };
+
+    // ========== SCENE SETUP ==========
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87ceeb);
+    scene.fog = new THREE.Fog(0x87ceeb, 800, 4500);
+
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.5, 20000);
+    camera.position.set(0, 15, 40);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    container.appendChild(renderer.domElement);
+
+    // Lights
+    const hemi = new THREE.HemisphereLight(0x87ceeb, 0x445522, 0.7);
+    scene.add(hemi);
+    const sun = new THREE.DirectionalLight(0xfff5e0, 1.1);
+    sun.position.set(200, 300, 100);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.near = 10;
+    sun.shadow.camera.far = 1200;
+    sun.shadow.camera.left = -300;
+    sun.shadow.camera.right = 300;
+    sun.shadow.camera.top = 300;
+    sun.shadow.camera.bottom = -300;
+    scene.add(sun);
+
+    // ========== GROUND & AIRPORT ==========
+    const groundGeo = new THREE.PlaneGeometry(8000, 8000);
+    const groundMat = new THREE.MeshLambertMaterial({ color: 0x3a6b3a });
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    // Runway
+    const runwayLen = 1800;
+    const runwayWid = 45;
+    const runwayGeo = new THREE.PlaneGeometry(runwayLen, runwayWid);
+    const runwayMat = new THREE.MeshLambertMaterial({ color: 0x2a2a2a });
+    const runway = new THREE.Mesh(runwayGeo, runwayMat);
+    runway.rotation.x = -Math.PI / 2;
+    runway.position.set(0, 0.15, 0);
+    runway.receiveShadow = true;
+    scene.add(runway);
+
+    // Runway markings
+    const markMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    for (let i = -8; i <= 8; i++) {
+      const stripe = new THREE.Mesh(new THREE.PlaneGeometry(40, 1.2), markMat);
+      stripe.rotation.x = -Math.PI / 2;
+      stripe.position.set(i * 90, 0.16, 0);
+      scene.add(stripe);
+    }
+    // Threshold
+    for (let i = -2; i <= 2; i++) {
+      const th = new THREE.Mesh(new THREE.PlaneGeometry(12, 3), markMat);
+      th.rotation.x = -Math.PI / 2;
+      th.position.set(-runwayLen/2 + 30, 0.16, i * 8);
+      scene.add(th);
+    }
+
+    // Taxiway
+    const taxiGeo = new THREE.PlaneGeometry(60, 400);
+    const taxiMat = new THREE.MeshLambertMaterial({ color: 0x333333 });
+    const taxi = new THREE.Mesh(taxiGeo, taxiMat);
+    taxi.rotation.x = -Math.PI / 2;
+    taxi.position.set(-runwayLen/2 + 100, 0.12, 220);
+    scene.add(taxi);
+
+    // Apron
+    const apron = new THREE.Mesh(new THREE.PlaneGeometry(200, 150), taxiMat);
+    apron.rotation.x = -Math.PI / 2;
+    apron.position.set(-runwayLen/2 + 100, 0.1, 350);
+    scene.add(apron);
+
+    // Simple terminal building
+    const terminal = new THREE.Mesh(
+      new THREE.BoxGeometry(120, 25, 40),
+      new THREE.MeshLambertMaterial({ color: 0x8899aa })
+    );
+    terminal.position.set(-runwayLen/2 + 100, 12.5, 430);
+    terminal.castShadow = true;
+    scene.add(terminal);
+
+    // Tower
+    const towerBase = new THREE.Mesh(
+      new THREE.CylinderGeometry(6, 8, 40, 8),
+      new THREE.MeshLambertMaterial({ color: 0x667788 })
+    );
+    towerBase.position.set(-runwayLen/2 + 250, 20, 380);
+    towerBase.castShadow = true;
+    scene.add(towerBase);
+    const towerCab = new THREE.Mesh(
+      new THREE.BoxGeometry(16, 8, 16),
+      new THREE.MeshLambertMaterial({ color: 0xaaccff, transparent: true, opacity: 0.7 })
+    );
+    towerCab.position.set(-runwayLen/2 + 250, 44, 380);
+    scene.add(towerCab);
+
+    // Trees / simple objects for reference
+    function addTree(x, z) {
+      const trunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.8, 1.2, 8, 6),
+        new THREE.MeshLambertMaterial({ color: 0x4a3020 })
+      );
+      trunk.position.set(x, 4, z);
+      trunk.castShadow = true;
+      scene.add(trunk);
+      const leaves = new THREE.Mesh(
+        new THREE.ConeGeometry(6, 14, 7),
+        new THREE.MeshLambertMaterial({ color: 0x2d5a2d })
+      );
+      leaves.position.set(x, 14, z);
+      leaves.castShadow = true;
+      scene.add(leaves);
+    }
+    for (let i = 0; i < 40; i++) {
+      const x = (Math.random() - 0.5) * 3000;
+      const z = (Math.random() - 0.5) * 3000;
+      if (Math.abs(z) < 80 && Math.abs(x) < runwayLen/2 + 50) continue;
+      addTree(x, z);
+    }
+
+    // ========== AIRCRAFT ==========
+    const aircraft = new THREE.Group();
+
+    // Fuselage
+    const fuselage = new THREE.Mesh(
+      new THREE.BoxGeometry(2.2, 1.4, 9),
+      new THREE.MeshLambertMaterial({ color: 0xffffff })
+    );
+    fuselage.castShadow = true;
+    aircraft.add(fuselage);
+
+    // Nose
+    const nose = new THREE.Mesh(
+      new THREE.ConeGeometry(1.1, 2.5, 8),
+      new THREE.MeshLambertMaterial({ color: 0xffffff })
+    );
+    nose.rotation.x = Math.PI / 2;
+    nose.position.z = -5.5;
+    aircraft.add(nose);
+
+    // Wings
+    const wing = new THREE.Mesh(
+      new THREE.BoxGeometry(14, 0.25, 2.2),
+      new THREE.MeshLambertMaterial({ color: 0xdddddd })
+    );
+    wing.position.y = 0.2;
+    wing.castShadow = true;
+    aircraft.add(wing);
+
+    // Tail
+    const hstab = new THREE.Mesh(
+      new THREE.BoxGeometry(4.5, 0.15, 1.2),
+      new THREE.MeshLambertMaterial({ color: 0xdddddd })
+    );
+    hstab.position.set(0, 0.3, 4.2);
+    aircraft.add(hstab);
+
+    const vstab = new THREE.Mesh(
+      new THREE.BoxGeometry(0.2, 2.2, 1.5),
+      new THREE.MeshLambertMaterial({ color: 0x2244aa })
+    );
+    vstab.position.set(0, 1.4, 4.3);
+    aircraft.add(vstab);
+
+    // Prop (simple)
+    const prop = new THREE.Mesh(
+      new THREE.BoxGeometry(0.15, 3.2, 0.3),
+      new THREE.MeshLambertMaterial({ color: 0x222222 })
+    );
+    prop.position.z = -6.6;
+    aircraft.add(prop);
+
+    // Landing gear
+    const gearMat = new THREE.MeshLambertMaterial({ color: 0x333333 });
+    const gearL = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 1.2), gearMat);
+    gearL.position.set(-1.5, -1.0, 0.5);
+    aircraft.add(gearL);
+    const gearR = gearL.clone();
+    gearR.position.x = 1.5;
+    aircraft.add(gearR);
+    const gearN = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.0), gearMat);
+    gearN.position.set(0, -0.9, -3.5);
+    aircraft.add(gearN);
+
+    aircraft.position.set(-runwayLen/2 + 100, 2.2, 320); // on apron
+    aircraft.rotation.y = Math.PI; // facing runway direction roughly
+    scene.add(aircraft);
+
+    // ========== CAMERA ==========
+    let chaseOffset = new THREE.Vector3(0, 8, 28);
+    const freeControls = new OrbitControls(camera, renderer.domElement);
+    freeControls.enabled = false;
+    freeControls.target.copy(aircraft.position);
+
+    // ========== INPUT ==========
+    const keys = {};
+    window.addEventListener('keydown', e => {
+      keys[e.code] = true;
+      if (e.code === 'KeyG') {
+        state.gearDown = !state.gearDown;
+        gearL.visible = gearR.visible = gearN.visible = state.gearDown;
+        logSys('Landing gear ' + (state.gearDown ? 'DOWN' : 'UP'));
+      }
+      if (e.code === 'KeyB') {
+        state.brakes = !state.brakes;
+        logSys('Brakes ' + (state.brakes ? 'ON' : 'OFF'));
+      }
+      if (e.code === 'KeyC') {
+        state.cameraMode = (state.cameraMode + 1) % 3;
+        freeControls.enabled = state.cameraMode === 2;
+        logSys('Camera: ' + ['Chase', 'Cockpit', 'Free'][state.cameraMode]);
+      }
+      if (e.code === 'Space' && !state.airborne) {
+        state.speed = Math.max(0, state.speed - 8);
+      }
+    });
+    window.addEventListener('keyup', e => { keys[e.code] = false; });
+
+    // ========== PHYSICS UPDATE ==========
+    let lastTime = performance.now();
+    function updatePhysics(dt) {
+      // Throttle
+      if (keys['ShiftLeft'] || keys['ShiftRight']) state.throttle = Math.min(100, state.throttle + 40 * dt);
+      if (keys['ControlLeft'] || keys['ControlRight']) state.throttle = Math.max(0, state.throttle - 50 * dt);
+
+      // Controls only if engines running or already moving
+      const canControl = state.enginesRunning || state.speed > 5;
+
+      if (canControl) {
+        // Pitch
+        if (keys['KeyW'] || keys['ArrowUp']) state.pitch = Math.min(0.35, state.pitch + 0.6 * dt);
+        else if (keys['KeyS'] || keys['ArrowDown']) state.pitch = Math.max(-0.35, state.pitch - 0.6 * dt);
+        else state.pitch *= 0.92;
+
+        // Roll
+        if (keys['KeyA'] || keys['ArrowLeft']) state.roll = Math.min(0.7, state.roll + 0.9 * dt);
+        else if (keys['KeyD'] || keys['ArrowRight']) state.roll = Math.max(-0.7, state.roll - 0.9 * dt);
+        else state.roll *= 0.9;
+
+        // Yaw
+        if (keys['KeyQ']) state.yawRate = Math.min(0.8, state.yawRate + 1.2 * dt);
+        else if (keys['KeyE']) state.yawRate = Math.max(-0.8, state.yawRate - 1.2 * dt);
+        else state.yawRate *= 0.85;
+      }
+
+      // Speed model (very simplified)
+      const thrust = state.enginesRunning ? state.throttle * 0.55 : 0;
+      const drag = 0.08 + (state.gearDown ? 0.04 : 0) + (state.brakes && !state.airborne ? 0.35 : 0);
+      const accel = (thrust - drag * state.speed) * dt;
+      state.speed = Math.max(0, state.speed + accel);
+
+      // Fuel burn
+      if (state.enginesRunning) {
+        state.fuel = Math.max(0, state.fuel - 0.008 * (state.throttle / 100 + 0.15) * dt);
+        if (state.fuel <= 0) {
+          state.enginesRunning = false;
+          state.throttle = 0;
+          logSys('ENGINES FLAME OUT – OUT OF FUEL');
+        }
+      }
+
+      // Ground / Airborne logic
+      const pos = aircraft.position;
+      const onGround = pos.y <= 2.3 && state.speed < 65;
+
+      if (onGround && !state.airborne) {
+        // Ground handling
+        state.altitude = 0;
+        state.verticalSpeed = 0;
+        pos.y = 2.2;
+
+        // Heading change from yaw + roll influence
+        state.heading += state.yawRate * 45 * dt * (state.speed / 30);
+        if (state.heading < 0) state.heading += 360;
+        if (state.heading >= 360) state.heading -= 360;
+
+        // Move
+        const rad = THREE.MathUtils.degToRad(state.heading);
+        const move = state.speed * 0.514 * dt; // knots to m/s approx
+        pos.x += Math.sin(rad) * move;
+        pos.z -= Math.cos(rad) * move;
+
+        // Rotation visual
+        aircraft.rotation.order = 'YXZ';
+        aircraft.rotation.y = rad;
+        aircraft.rotation.x = state.pitch * 0.3;
+        aircraft.rotation.z = -state.roll * 0.4;
+
+        // Takeoff decision
+        if (state.speed > 55 && state.pitch > 0.12 && state.takeoffClearance) {
+          state.airborne = true;
+          state.phase = 'airborne';
+          updatePhaseUI();
+          logATC('Tower', 'N172SP, runway 27, wind calm, cleared for takeoff.');
+        }
+      } else {
+        // Airborne
+        state.airborne = true;
+        if (state.phase === 'taxi' || state.phase === 'ground') {
+          state.phase = 'airborne';
+          updatePhaseUI();
+        }
+
+        // Climb / descent from pitch
+        const climbRate = state.pitch * state.speed * 2.8; // rough fpm
+        state.verticalSpeed = climbRate * 60 * 0.6;
+        state.altitude += climbRate * dt;
+        pos.y = 2.2 + state.altitude * 0.3048; // feet to meters
+
+        // Turn rate influenced by roll
+        const turnRate = state.roll * 40 * (state.speed / 80);
+        state.heading += turnRate * dt;
+        if (state.heading < 0) state.heading += 360;
+        if (state.heading >= 360) state.heading -= 360;
+
+        // Move
+        const rad = THREE.MathUtils.degToRad(state.heading);
+        const move = state.speed * 0.514 * dt;
+        pos.x += Math.sin(rad) * move;
+        pos.z -= Math.cos(rad) * move;
+
+        aircraft.rotation.order = 'YXZ';
+        aircraft.rotation.y = rad;
+        aircraft.rotation.x = state.pitch;
+        aircraft.rotation.z = -state.roll;
+
+        // Landing detection
+        if (pos.y <= 2.4 && state.verticalSpeed < 0 && state.speed < 70) {
+          pos.y = 2.2;
+          state.altitude = 0;
+          state.airborne = false;
+          state.verticalSpeed = 0;
+          state.phase = 'ground';
+          state.takeoffClearance = false;
+          updatePhaseUI();
+          logATC('Tower', 'N172SP, welcome back. Taxi to parking via Alpha.');
+          logSys('Touchdown. Nice landing!');
+        }
+
+        // Stall-ish
+        if (state.speed < 40 && state.altitude > 50) {
+          state.pitch = Math.max(state.pitch - 0.4 * dt, -0.5);
+        }
+      }
+
+      // Prop spin
+      if (state.enginesRunning) {
+        prop.rotation.z += state.throttle * 0.4 * dt;
+      }
+
+      // Update instruments
+      document.getElementById('spd').textContent = Math.round(state.speed);
+      document.getElementById('alt').textContent = Math.round(state.altitude);
+      document.getElementById('hdg').textContent = Math.round(state.heading).toString().padStart(3, '0');
+      document.getElementById('vs').textContent = Math.round(state.verticalSpeed);
+      document.getElementById('thr').textContent = Math.round(state.throttle);
+      document.getElementById('fuel-status').textContent = Math.round(state.fuel) + '%';
+      document.getElementById('fuel-status').className = state.fuel > 25 ? 'status-ok' : (state.fuel > 10 ? 'status-warn' : 'status-off');
+    }
+
+    function updateCamera() {
+      if (state.cameraMode === 0) {
+        // Chase
+        const offset = chaseOffset.clone();
+        offset.applyQuaternion(aircraft.quaternion);
+        camera.position.lerp(aircraft.position.clone().add(offset), 0.08);
+        camera.lookAt(aircraft.position.clone().add(new THREE.Vector3(0, 2, 0)));
+      } else if (state.cameraMode === 1) {
+        // Cockpit-ish
+        const cock = new THREE.Vector3(0, 1.2, -1.5);
+        cock.applyQuaternion(aircraft.quaternion);
+        camera.position.copy(aircraft.position.clone().add(cock));
+        const look = new THREE.Vector3(0, 0.8, -20);
+        look.applyQuaternion(aircraft.quaternion);
+        camera.lookAt(aircraft.position.clone().add(look));
+      }
+      // free mode uses OrbitControls
+    }
+
+    // ========== ATC & GROUND LOGIC ==========
+    function logATC(who, text) {
+      const log = document.getElementById('radio-log');
+      const div = document.createElement('div');
+      div.className = 'msg-atc';
+      div.textContent = `${who}: ${text}`;
+      log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
+    }
+    function logPilot(text) {
+      const log = document.getElementById('radio-log');
+      const div = document.createElement('div');
+      div.className = 'msg-pilot';
+      div.textContent = `N172SP: ${text}`;
+      log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
+    }
+    function logSys(text) {
+      const log = document.getElementById('radio-log');
+      const div = document.createElement('div');
+      div.className = 'msg-sys';
+      div.textContent = `[SYS] ${text}`;
+      log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function updatePhaseUI() {
+      const el = document.getElementById('flight-phase');
+      el.className = 'phase ' + state.phase;
+      const labels = { ground: 'ON GROUND', taxi: 'TAXI', airborne: 'AIRBORNE', approach: 'APPROACH' };
+      el.textContent = labels[state.phase] || state.phase.toUpperCase();
+    }
+
+    function setFreq(freq) {
+      state.activeFreq = freq;
+      const names = { ground: '121.900 Ground', tower: '118.700 Tower', approach: '119.400 Approach' };
+      document.getElementById('active-freq').textContent = names[freq];
+      logSys(`Switched to ${names[freq]}`);
+    }
+
+    // Button handlers
+    document.querySelectorAll('[data-freq]').forEach(btn => {
+      btn.addEventListener('click', () => setFreq(btn.dataset.freq));
+    });
+
+    document.getElementById('req-taxi').addEventListener('click', () => {
+      if (state.phase !== 'ground') {
+        logATC('Ground', 'N172SP, remain clear of the movement area.');
+        return;
+      }
+      if (!state.enginesRunning) {
+        logATC('Ground', 'N172SP, start engines first.');
+        return;
+      }
+      logPilot('Kissimmee Ground, N172SP at the ramp, request taxi for runway 27.');
+      setTimeout(() => {
+        logATC('Ground', 'N172SP, taxi to runway 27 via Alpha. Hold short.');
+        state.taxiClearance = true;
+        state.phase = 'taxi';
+        updatePhaseUI();
+        state.brakes = false;
+      }, 800);
+    });
+
+    document.getElementById('req-takeoff').addEventListener('click', () => {
+      if (state.activeFreq !== 'tower') {
+        logATC('Tower', 'N172SP, contact Tower on 118.7.');
+        return;
+      }
+      if (!state.taxiClearance && state.phase === 'ground') {
+        logATC('Tower', 'N172SP, contact Ground for taxi first.');
+        return;
+      }
+      logPilot('Tower, N172SP holding short runway 27, ready for departure.');
+      setTimeout(() => {
+        logATC('Tower', 'N172SP, runway 27, wind 270 at 5, cleared for takeoff.');
+        state.takeoffClearance = true;
+        state.brakes = false;
+      }, 900);
+    });
+
+    document.getElementById('req-landing').addEventListener('click', () => {
+      if (state.activeFreq !== 'tower' && state.activeFreq !== 'approach') {
+        logATC('Approach', 'N172SP, contact Approach or Tower.');
+        return;
+      }
+      logPilot('Tower, N172SP, 8 miles out, request full stop.');
+      setTimeout(() => {
+        logATC('Tower', 'N172SP, runway 27, cleared to land. Wind calm.');
+        state.landingClearance = true;
+        state.phase = 'approach';
+        updatePhaseUI();
+      }, 900);
+    });
+
+    document.getElementById('req-freq-change').addEventListener('click', () => {
+      if (state.activeFreq === 'ground') {
+        logPilot('Ground, N172SP, request Tower.');
+        setTimeout(() => {
+          logATC('Ground', 'N172SP, contact Tower 118.7, good day.');
+          setFreq('tower');
+        }, 600);
+      } else if (state.activeFreq === 'tower' && state.airborne) {
+        logPilot('Tower, N172SP, request Approach.');
+        setTimeout(() => {
+          logATC('Tower', 'N172SP, contact Approach 119.4.');
+          setFreq('approach');
+        }, 600);
+      } else {
+        logATC(state.activeFreq === 'approach' ? 'Approach' : 'Tower', 'N172SP, remain this frequency.');
+      }
+    });
+
+    // Ground services
+    document.getElementById('btn-fuel').addEventListener('click', () => {
+      if (state.airborne || state.enginesRunning) {
+        logSys('Cannot refuel with engines running or in flight.');
+        return;
+      }
+      logSys('Fuel truck approaching…');
+      setTimeout(() => {
+        state.fuel = 100;
+        document.getElementById('fuel-status').textContent = '100%';
+        document.getElementById('fuel-status').className = 'status-ok';
+        logSys('Refueling complete. 100% fuel.');
+      }, 2500);
+    });
+
+    document.getElementById('btn-gpu').addEventListener('click', () => {
+      if (state.airborne) return;
+      state.gpuConnected = !state.gpuConnected;
+      document.getElementById('gpu-status').textContent = state.gpuConnected ? 'Connected' : 'Disconnected';
+      document.getElementById('gpu-status').className = state.gpuConnected ? 'status-ok' : 'status-off';
+      logSys('GPU ' + (state.gpuConnected ? 'connected' : 'disconnected'));
+    });
+
+    document.getElementById('btn-stairs').addEventListener('click', () => {
+      if (state.airborne) return;
+      state.stairsExtended = !state.stairsExtended;
+      document.getElementById('stairs-status').textContent = state.stairsExtended ? 'Extended' : 'Retracted';
+      document.getElementById('stairs-status').className = state.stairsExtended ? 'status-ok' : 'status-off';
+      logSys('Stairs ' + (state.stairsExtended ? 'extended' : 'retracted'));
+    });
+
+    document.getElementById('btn-push').addEventListener('click', () => {
+      if (state.airborne || state.enginesRunning) {
+        logSys('Pushback only available with engines off on the ramp.');
+        return;
+      }
+      state.pushbackConnected = true;
+      document.getElementById('push-status').textContent = 'Connected';
+      document.getElementById('push-status').className = 'status-ok';
+      logSys('Pushback tug connected. Release parking brake when ready.');
+      // Simple auto push for demo
+      setTimeout(() => {
+        if (state.pushbackConnected) {
+          logSys('Pushback complete. Tug disconnecting.');
+          state.pushbackConnected = false;
+          document.getElementById('push-status').textContent = 'Not connected';
+          document.getElementById('push-status').className = 'status-off';
+          // Nudge aircraft a bit
+          aircraft.position.z -= 15;
+        }
+      }, 4000);
+    });
+
+    document.getElementById('btn-engines').addEventListener('click', () => {
+      if (state.airborne) return;
+      if (state.fuel <= 0) {
+        logSys('No fuel – cannot start engines.');
+        return;
+      }
+      if (state.stairsExtended || state.gpuConnected) {
+        logSys('Retract stairs and disconnect GPU before engine start.');
+        return;
+      }
+      state.enginesRunning = !state.enginesRunning;
+      const btn = document.getElementById('btn-engines');
+      if (state.enginesRunning) {
+        btn.textContent = 'Shutdown Engines';
+        btn.classList.add('active');
+        logSys('Engines started. Prop turning.');
+        logATC('Ground', 'N172SP, engines noted. Advise when ready to taxi.');
+      } else {
+        btn.textContent = 'Start Engines';
+        btn.classList.remove('active');
+        state.throttle = 0;
+        logSys('Engines shutdown.');
+      }
+    });
+
+    document.getElementById('btn-ready').addEventListener('click', () => {
+      if (state.stairsExtended) {
+        logSys('Stairs still extended.');
+        return;
+      }
+      if (state.gpuConnected) {
+        logSys('GPU still connected.');
+        return;
+      }
+      if (!state.enginesRunning) {
+        logSys('Start engines first.');
+        return;
+      }
+      logPilot('Ground, N172SP ready for departure.');
+      logATC('Ground', 'N172SP, roger. Call for taxi when ready.');
+    });
+
+    // Panel toggles
+    let leftOpen = true, rightOpen = true;
+    document.getElementById('toggle-left').addEventListener('click', () => {
+      leftOpen = !leftOpen;
+      document.getElementById('left-panel').style.display = leftOpen ? 'block' : 'none';
+    });
+    document.getElementById('toggle-right').addEventListener('click', () => {
+      rightOpen = !rightOpen;
+      document.getElementById('right-panel').style.display = rightOpen ? 'block' : 'none';
+    });
+
+    // Store ratings locally so the simulator can show an average without a backend.
+    const ratingKey = 'flightsims-skyrunner-ratings';
+    let selectedRating = 0;
+    const ratingStars = Array.from(document.querySelectorAll('.star'));
+    const ratingSubmit = document.getElementById('rating-submit');
+    const ratingSummary = document.getElementById('rating-summary');
+
+    function getRatings() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(ratingKey) || '[]');
+        return Array.isArray(saved) ? saved.filter(value => Number.isInteger(value) && value >= 1 && value <= 5) : [];
+      } catch {
+        return [];
+      }
+    }
+
+    function updateRatingSummary() {
+      const ratings = getRatings();
+      if (!ratings.length) {
+        ratingSummary.textContent = 'Be the first to rate SkyRunner';
+        return;
+      }
+      const average = ratings.reduce((sum, value) => sum + value, 0) / ratings.length;
+      ratingSummary.textContent = `${average.toFixed(1)} / 5 — ${ratings.length} rating${ratings.length === 1 ? '' : 's'}`;
+    }
+
+    ratingStars.forEach(star => {
+      star.addEventListener('click', () => {
+        selectedRating = Number(star.dataset.rating);
+        ratingStars.forEach((item, index) => item.classList.toggle('active', index < selectedRating));
+        ratingSubmit.disabled = false;
+        ratingSubmit.textContent = `Submit ${selectedRating}-Star Rating`;
+      });
+    });
+
+    ratingSubmit.addEventListener('click', () => {
+      if (!selectedRating) return;
+      const ratings = getRatings();
+      ratings.push(selectedRating);
+      try {
+        localStorage.setItem(ratingKey, JSON.stringify(ratings));
+        ratingSubmit.textContent = 'Rating Submitted';
+        ratingSubmit.disabled = true;
+        ratingStars.forEach(star => star.classList.remove('active'));
+        selectedRating = 0;
+        updateRatingSummary();
+      } catch {
+        ratingSummary.textContent = 'Rating could not be saved in this browser';
+      }
+    });
+
+    updateRatingSummary();
+
+    // ========== MAIN LOOP ==========
+    function animate() {
+      requestAnimationFrame(animate);
+      const now = performance.now();
+      const dt = Math.min((now - lastTime) / 1000, 0.05);
+      lastTime = now;
+
+      updatePhysics(dt);
+      updateCamera();
+      if (state.cameraMode === 2) freeControls.update();
+
+      renderer.render(scene, camera);
+    }
+
+    // Resize
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // Start
+    setTimeout(() => {
+      document.getElementById('loading').style.opacity = '0';
+      setTimeout(() => document.getElementById('loading').style.display = 'none', 500);
+      logSys('Systems online. Welcome to Kissimmee Gateway (KISM).');
+      logATC('Ground', 'N172SP, Kissimmee Ground, information Alpha. Advise intentions.');
+      animate();
+    }, 600);
+  </script>
 </body>
 </html>

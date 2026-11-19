@@ -8,24 +8,29 @@ export const WATER_LEVEL = 196;
 const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 export const AIRPORTS = [
-  {
-    icao: 'KVLY', name: 'Cedar Valley Regional', x: 0, z: 0, hdg: 90, len: 1650, wid: 30, rwy: ['09', '27'],
-    tower: true, ils: { end: 1, freq: 110.30, ident: 'IVLY' }, apron: { u: 300, v: -175, w: 260, h: 110 }, taxiV: -115,
-  },
-  {
-    icao: 'KLKS', name: 'Lakeshore Municipal', x: 9800, z: 7600, hdg: 0, len: 1250, wid: 23, rwy: ['36', '18'],
-    apron: { u: -250, v: 110, w: 160, h: 80 }, taxiV: 75,
-  },
-  {
-    icao: 'KRDG', name: 'Granite Ridge Field', x: -7400, z: -12400, hdg: 40, len: 980, wid: 18, rwy: ['04', '22'],
-    apron: { u: 150, v: -80, w: 110, h: 60 }, taxiV: -45,
-  },
+  { icao:'KSFO', name:'San Francisco International', x:0, z:0, hdg:284, len:3618, wid:60, rwy:['28L','10R'], tower:true, ils:{end:0,freq:111.55,ident:'ISFO'}, apron:{u:380,v:-180,w:300,h:140},taxiV:-125 },
+  { icao:'KOAK', name:'Oakland International', x:13584, z:-11262, hdg:304, len:3206, wid:46, rwy:['30','12'], tower:true, ils:{end:0,freq:109.30,ident:'IOAK'}, apron:{u:300,v:-150,w:240,h:120},taxiV:-105 },
+  { icao:'KSJC', name:'Norman Y. Mineta San Jose International', x:39319, z:28556, hdg:304, len:3353, wid:46, rwy:['30L','12R'], tower:true, ils:{end:0,freq:110.30,ident:'ISJC'}, apron:{u:330,v:-160,w:270,h:130},taxiV:-110 },
+  { icao:'KHWD', name:'Hayward Executive', x:22320, z:-4492, hdg:300, len:1735, wid:46, rwy:['28L','10R'], tower:true, apron:{u:220,v:-120,w:180,h:90},taxiV:-75 },
+  { icao:'KSQL', name:'San Carlos', x:10972, z:11751, hdg:300, len:799, wid:23, rwy:['30','12'], tower:true, apron:{u:120,v:-75,w:110,h:55},taxiV:-45 },
+  { icao:'KPAO', name:'Palo Alto', x:22937, z:17536, hdg:310, len:744, wid:21, rwy:['31','13'], tower:true, apron:{u:120,v:-70,w:100,h:50},taxiV:-40 },
+  { icao:'KLVK', name:'Livermore Municipal', x:23000, z:-3000, hdg:252, len:1601, wid:30, rwy:['25R','07L'], tower:true, apron:{u:190,v:-100,w:180,h:90},taxiV:-65 },
+  { icao:'KCCR', name:'Buchanan Field', x:4881, z:-18914, hdg:323, len:1524, wid:46, rwy:['32L','14R'], tower:true, apron:{u:180,v:-100,w:150,h:80},taxiV:-65 },
+  { icao:'KAPC', name:'Napa County', x:-15000, z:-26000, hdg:242, len:1689, wid:46, rwy:['24','06'], tower:true, apron:{u:200,v:-110,w:170,h:90},taxiV:-65 },
+  { icao:'KSTS', name:'Charles M. Schulz Sonoma County', x:-25000, z:-29000, hdg:140, len:1829, wid:46, rwy:['14','32'], tower:true, apron:{u:190,v:-105,w:160,h:85},taxiV:-60 },
+  { icao:'KNUQ', name:'Moffett Federal Airfield', x:28749, z:22540, hdg:322, len:2802, wid:61, rwy:['32R','14L'], tower:true, apron:{u:300,v:-150,w:230,h:110},taxiV:-100 },
+  { icao:'KTCY', name:'Tracy Municipal', x:22000, z:-18000, hdg:312, len:1220, wid:23, rwy:['30','12'], apron:{u:200,v:-95,w:150,h:75},taxiV:-60 },
+  { icao:'KRHV', name:'Reid-Hillview of Santa Clara County', x:19000, z:19000, hdg:312, len:944, wid:23, rwy:['13R','31L'], apron:{u:120,v:-70,w:100,h:50},taxiV:-40 },
+  { icao:'KO69', name:'Petaluma Municipal', x:-21000, z:-22000, hdg:293, len:1097, wid:23, rwy:['29','11'], apron:{u:130,v:-70,w:110,h:55},taxiV:-45 },
+  { icao:'KHAF', name:'Half Moon Bay', x:-11061, z:-11720, hdg:120, len:1524, wid:46, rwy:['30','12'], tower:true, apron:{u:150,v:-85,w:130,h:65},taxiV:-50 },
 ];
 // navaids
 export const NAVAIDS = [
-  { type: 'VOR', ident: 'VLY', name: 'Cedar Valley', freq: 113.4, x: 650, z: -520 },
-  { type: 'VOR', ident: 'RDG', name: 'Granite', freq: 116.8, x: -6900, z: -13200 },
-  { type: 'NDB', ident: 'LK', name: 'Lakeshore', freq: 0.344, x: 9900, z: 5200 },
+  { type: 'VOR', ident: 'SFO', name: 'San Francisco', freq: 115.8, x: -8000, z: 12000 },
+  { type: 'VOR', ident: 'OAK', name: 'Oakland', freq: 116.8, x: 21000, z: 10000 },
+  { type: 'VOR', ident: 'SJC', name: 'San Jose', freq: 114.1, x: 24000, z: -35000 },
+  { type: 'VOR', ident: 'SAU', name: 'Sausalito', freq: 113.7, x: -22000, z: 24000 },
+  { type: 'NDB', ident: 'HV', name: 'Hayward', freq: 0.374, x: 17000, z: -17000 },
 ];
 
 // precompute natural elevation for airports
@@ -38,13 +43,19 @@ for (const a of AIRPORTS) {
 function natural(x, z) {
   let h = 250 + 70 * fbm(x / 16000, z / 16000, 4);
   h += 48 * fbm(x / 3800 + 3.1, z / 3800 - 1.7, 5);
-  // northern mountain range
+  // Bay Area coastal ranges and Central Valley foothills
   const mN = ss(2500, 16000, -z + 3000 * simplex(x / 9000, 5.5)) * (0.65 + 0.35 * simplex(x / 12000, z / 12000 + 2));
   const r = ridged(x / 7600 + 1.3, z / 7600 - 2.2, 7);
   h += mN * 2700 * Math.pow(r, 1.5);
-  // southwest bluffs
+  // Santa Cruz / Peninsula mountains (southwest of San Francisco Bay)
   const mS = ss(6000, 22000, Math.hypot(x + 20000, z - 18000) * -1 + 26000) * 0.9;
   h += mS * 520 * Math.pow(ridged(x / 5200, z / 5200, 5), 2);
+  const peninsula = 1 - ss(9000, 18000, Math.abs(x - z * 0.55));
+  h += peninsula * ss(-26000, -8000, z) * 900 * ridged(x / 6500 + 4, z / 6500 - 2, 6);
+  // Diagonal San Francisco Bay basin
+  const bayDist = Math.abs(x - 0.20 * z - 500);
+  const bay = ss(4000, 900, bayDist);
+  h = h * (1 - bay) + (WATER_LEVEL - 18) * bay;
   // lake basin east of Lakeshore
   const ld = Math.hypot((x - 15200) / 1.25, z - 6600) / 3200 + 0.22 * simplex(x / 2500, z / 2500);
   const lake = ss(1.0, 0.55, ld);
@@ -63,7 +74,6 @@ for (const a of AIRPORTS) {
   let s = 0, n = 0;
   for (let u = -a.len / 2; u <= a.len / 2; u += a.len / 8) { s += natural(a.x + a.dir[0] * u, a.z + a.dir[1] * u); n++; }
   a.elev = Math.max(WATER_LEVEL + 12, s / n);
-  if (a.icao === 'KVLY') a.elev = Math.max(a.elev, 238);
 }
 export function toLocal(a, x, z) {
   const dx = x - a.x, dz = z - a.z;
@@ -161,12 +171,12 @@ export function farmAt(x, z, h, slope) {
 // ---------------- settlements ----------------
 // rot = street grid rotation (deg), grid = block size (m), core = downtown radius (m)
 export const TOWNS = [
-  { name: 'CEDAR FALLS', x: 2600, z: 2300, r: 1100, rot: 18, grid: 70, core: 260, seed: 4242 },
-  { name: 'LAKESHORE', x: 11500, z: 11200, r: 800, rot: -8, grid: 66, core: 180, seed: 77 },
-  { name: 'MILLBROOK', x: -9300, z: 6600, r: 620, rot: 5, grid: 64, core: 120, seed: 913 },
-  { name: 'SOUTHGATE', x: 3900, z: 15200, r: 680, rot: 31, grid: 68, core: 140, seed: 5150 },
-  { name: 'WESTFIELD', x: -17200, z: -1800, r: 460, rot: -22, grid: 62, core: 90, seed: 2718 },
-  { name: 'GRANITE', x: -4350, z: -10150, r: 380, rot: 40, grid: 58, core: 70, seed: 1618 },
+  { name: 'SAN FRANCISCO', x: -12000, z: 12000, r: 8500, rot: 18, grid: 72, core: 1400, seed: 4242 },
+  { name: 'OAKLAND', x: 18000, z: 9000, r: 6500, rot: 8, grid: 68, core: 1100, seed: 77 },
+  { name: 'SAN JOSE', x: 26000, z: -36000, r: 8500, rot: 12, grid: 70, core: 1400, seed: 913 },
+  { name: 'BERKELEY', x: 6000, z: 19000, r: 2800, rot: 25, grid: 64, core: 700, seed: 5150 },
+  { name: 'PALO ALTO', x: -11000, z: -30000, r: 3200, rot: -12, grid: 66, core: 650, seed: 2718 },
+  { name: 'LIVERMORE', x: 39000, z: -8000, r: 3500, rot: 5, grid: 68, core: 700, seed: 1618 },
 ];
 export const TOWN = TOWNS[0];
 for (const t of TOWNS) { const r = t.rot * Math.PI / 180; t.cr = Math.cos(r); t.sr = Math.sin(r); }

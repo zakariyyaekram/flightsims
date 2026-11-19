@@ -58,7 +58,7 @@
 <div id="mapWrap" class="hidden">
   <canvas id="map" aria-label="Navigation map"></canvas>
   <div class="mapbar">
-    <strong>SECTIONAL — CEDAR VALLEY AREA</strong>
+    <strong>SECTIONAL — SAN FRANCISCO BAY AREA</strong>
     <button id="mapCenter">Center on aircraft</button>
     <button id="mapRot">Follow</button>
     <span class="hint">Drag to pan · Wheel to zoom · Double-click to reposition aircraft · M to close</span>
@@ -118,20 +118,23 @@
 <div id="menu" class="panelBox">
   <header>
     <svg viewBox="0 0 64 64" width="44" height="44" aria-label="Skyhawk logo"><circle cx="32" cy="32" r="30" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M8 34 L56 34 M30 22 L34 22 L35 34 M32 34 L32 50 M24 48 L40 48" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round"/></svg>
-    <div><h1>SKYHAWK</h1><p>Cessna 172S · Blade-element flight model · Cedar Valley region</p></div>
+    <div><h1>SKYHAWK</h1><p>Cessna 172S · Blade-element flight model · San Francisco Bay Area</p></div>
   </header>
   <div id="loading"><div class="bar"><div id="loadBar"></div></div><span id="loadText">Loading…</span></div>
   <form id="setup" class="hidden" onsubmit="return false">
     <div class="grid">
       <label>Start position
         <select id="spawn">
-          <option value="KVLY27">KVLY Cedar Valley — Rwy 27, ready for takeoff</option>
-          <option value="KVLY09">KVLY Cedar Valley — Rwy 09, ready for takeoff</option>
-          <option value="KVLYramp">KVLY Cedar Valley — Ramp, cold &amp; dark</option>
-          <option value="ILS27">ILS 27 KVLY — 8 NM final, 3,000 ft</option>
-          <option value="KLKS36">KLKS Lakeshore — Rwy 36</option>
-          <option value="KRDG04">KRDG Granite Ridge — Rwy 04 (mountain strip)</option>
-          <option value="cruise">Cruise 5,500 ft — over the valley</option>
+          <option value="SFO28">KSFO San Francisco — Rwy 28L, ready for takeoff</option>
+          <option value="SFOramp">KSFO San Francisco — Ramp, cold &amp; dark</option>
+          <option value="OAK12">KOAK Oakland — Rwy 12, ready for takeoff</option>
+          <option value="SJC30">KSJC San Jose — Rwy 30L, ready for takeoff</option>
+          <option value="HWD28">KHWD Hayward — Rwy 28L, ready for takeoff</option>
+          <option value="SQL30">KSQL San Carlos — Rwy 30, ready for takeoff</option>
+          <option value="LVK25">KLVK Livermore — Rwy 25R, ready for takeoff</option>
+          <option value="CCR32">KCCR Concord — Rwy 32L, ready for takeoff</option>
+          <option value="ILS28">ILS 28L KSFO — 8 NM final, 3,000 ft</option>
+          <option value="cruise">Cruise 5,500 ft — over the Bay</option>
         </select></label>
       <label>Time of day <output id="todOut">10:00</output>
         <input id="tod" type="range" min="4" max="21.5" step="0.25" value="10" /></label>
@@ -156,7 +159,7 @@
       <label>Fuel per tank <output id="fuelOut">24 gal</output>
         <input id="fuel" type="range" min="4" max="26" step="1" value="24" /></label>
       <label>Graphics
-        <select id="quality"><option value="high">High</option><option value="balanced" selected>Balanced</option><option value="perf">Performance</option></select></label>
+        <select id="quality"><option value="lite">Lite — low memory</option><option value="perf">Performance</option><option value="balanced" selected>Balanced</option><option value="high">High</option></select></label>
     </div>
     <div class="actions">
       <button class="primary" id="fly">Fly</button>

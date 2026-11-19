@@ -112,7 +112,7 @@ function applySetup(s, warmOnly = false) {
   const lightState = env.setTime(s.tod);
   sim.night = lightState.night;
   // quality
-  const q = { high: [1.75, 4096, 1.0], balanced: [1.25, 2048, 0.65], perf: [0.9, 1024, 0.35] }[s.quality] || [1.25, 2048, 0.65];
+  const q = { high: [1.75, 4096, 1.0], balanced: [1.25, 2048, 0.65], perf: [0.75, 512, 0.18], lite: [0.6, 256, 0.08] }[s.quality] || [1.25, 2048, 0.65];
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, q[0]));
   if (env.sun.shadow.mapSize.x !== q[1]) { env.sun.shadow.mapSize.set(q[1], q[1]); if (env.sun.shadow.map) { env.sun.shadow.map.dispose(); env.sun.shadow.map = null; } }
   forest.quality = q[2]; forest.lastKey = null; rocks.quality = q[2]; rocks.lastCell = null; grass.quality = q[2]; grass.lastKey = null; life.quality = q[2]; sim.quality = s.quality;
@@ -121,13 +121,17 @@ function applySetup(s, warmOnly = false) {
   const rwyStart = (a, end) => { const u = end === 0 ? -a.len / 2 + 35 : a.len / 2 - 35; const p = fromLocal(a, u, 0); return { p, hdg: end === 0 ? a.hdg : (a.hdg + 180) % 360 }; };
   let flapsInit = 0;
   switch (s.spawn) {
-    case 'KVLY09': { const r = rwyStart(airport('KVLY'), 0); pos = r.p; hdg = r.hdg; break; }
-    case 'KVLYramp': { const a = airport('KVLY'); const p = fromLocal(a, a.apron.u + 30, a.apron.v + 10); pos = p; hdg = (a.hdg + 90) % 360; cold = true; break; }
-    case 'ILS27': { const i = ILS.find((x) => x.ident === 'IVLY'); const d = 8 * 1852; const c = i.course * D2R; pos = { x: i.thr.x - Math.sin(c) * d, z: i.thr.z + Math.cos(c) * d }; hdg = i.course; onGround = false; speed = 95; alt = Math.max(3000 * FT + (s.qnhInHg - 29.92) * 1000 * FT, i.elev + Math.tan(3 * D2R) * d + 30); pitch = 2; break; }
-    case 'KLKS36': { const r = rwyStart(airport('KLKS'), 0); pos = r.p; hdg = r.hdg; break; }
-    case 'KRDG04': { const r = rwyStart(airport('KRDG'), 0); pos = r.p; hdg = r.hdg; break; }
+    case 'SFO28': { const r = rwyStart(airport('KSFO'), 0); pos = r.p; hdg = r.hdg; break; }
+    case 'OAK12': { const r = rwyStart(airport('KOAK'), 1); pos = r.p; hdg = r.hdg; break; }
+    case 'SJC30': { const r = rwyStart(airport('KSJC'), 0); pos = r.p; hdg = r.hdg; break; }
+    case 'HWD28': { const r = rwyStart(airport('KHWD'), 0); pos = r.p; hdg = r.hdg; break; }
+    case 'SQL30': { const r = rwyStart(airport('KSQL'), 0); pos = r.p; hdg = r.hdg; break; }
+    case 'LVK25': { const r = rwyStart(airport('KLVK'), 0); pos = r.p; hdg = r.hdg; break; }
+    case 'CCR32': { const r = rwyStart(airport('KCCR'), 0); pos = r.p; hdg = r.hdg; break; }
+    case 'SFOramp': { const a = airport('KSFO'); const p = fromLocal(a, a.apron.u + 30, a.apron.v + 10); pos = p; hdg = (a.hdg + 90) % 360; cold = true; break; }
+    case 'ILS28': { const i = ILS.find((x) => x.ident === 'ISFO') || ILS[0]; const d = 8 * 1852; const c = i.course * D2R; pos = { x: i.thr.x - Math.sin(c) * d, z: i.thr.z + Math.cos(c) * d }; hdg = i.course; onGround = false; speed = 95; alt = Math.max(3000 * FT + (s.qnhInHg - 29.92) * 1000 * FT, i.elev + Math.tan(3 * D2R) * d + 30); pitch = 2; break; }
     case 'cruise': { pos = { x: -6000, z: 9000 }; hdg = 75; onGround = false; speed = 108; alt = 5500 * FT; pitch = 1.5; break; }
-    default: { const r = rwyStart(airport('KVLY'), 1); pos = r.p; hdg = r.hdg; }
+    default: { const r = rwyStart(airport('KSFO'), 1); pos = r.p; hdg = r.hdg; }
   }
   const gh = heightAt(pos.x, pos.z);
   F.env.qnh = s.qnhInHg * INHG; F.env.isaDev = s.isa; F.env.turbulence = s.turb;
@@ -136,7 +140,7 @@ function applySetup(s, warmOnly = false) {
   F.sys.fuelL = F.sys.fuelR = s.fuel;
   if (!cold && sim.night > 0.25) { F.sys.panelLights = true; F.sys.nav = true; }
   F.kollsman = cold ? 29.92 : Math.round(s.qnhInHg * 100) / 100;
-  if (!onGround) { F.ctrl.throttle = s.spawn === 'ILS27' ? 0.5 : 0.72; F.ctrl.trim = s.spawn === 'ILS27' ? 0.2 : 0.05; F.ctrl.parkBrake = false; F.eng.rpm = 2300; F.eng.propOmega = 2300 * Math.PI / 30; }
+  if (!onGround) { F.ctrl.throttle = s.spawn === 'ILS28' ? 0.5 : 0.72; F.ctrl.trim = s.spawn === 'ILS28' ? 0.2 : 0.05; F.ctrl.parkBrake = false; F.eng.rpm = 2300; F.eng.propOmega = 2300 * Math.PI / 30; }
   if (onGround && !cold) { F.ctrl.throttle = 0.08; F.ctrl.parkBrake = false; F.ctrl.toeBrake = 0; }
   if (!onGround) F.trimAir(0); // solve AoA + elevator trim for 1 g at the spawn speed
   F.ind.ias = speed; F.ind.alt = 0;
@@ -144,9 +148,9 @@ function applySetup(s, warmOnly = false) {
   const av = sim.av;
   av.ap.on = false; av.ap.discAlert = 0;
   av.hdgBug = Math.round(hdg);
-  if (s.spawn === 'ILS27' || s.spawn.startsWith('KVLY')) { av.nav1.active = 110.3; av.nav1.obs = 270; av.nav1.standby = 113.4; }
-  if (s.spawn === 'KLKS36') { av.nav1.active = 113.4; av.nav1.obs = 0; }
-  if (s.spawn === 'KRDG04') { av.nav1.active = 116.8; av.nav1.obs = 40; }
+  if (s.spawn === 'ILS28' || s.spawn.startsWith('SFO')) { av.nav1.active = 111.55; av.nav1.obs = 284; av.nav1.standby = 115.8; }
+  if (s.spawn === 'OAK12') { av.nav1.active = 109.30; av.nav1.obs = 120; }
+  if (s.spawn === 'SJC30') { av.nav1.active = 110.30; av.nav1.obs = 300; }
   // weather
   const wr = s.windDir * D2R, ws = s.windKt * KT;
   sim.windVec = [-Math.sin(wr) * ws, 0, Math.cos(wr) * ws];
@@ -576,7 +580,7 @@ $('fly').onclick = () => {
   showMenu(false); $('hud').classList.remove('hidden'); $('crash').classList.add('hidden');
   sim.started = true; sim.panelDirty = true; togglePause(false);
   setView(sim.view === 'walk' ? 'cockpit' : sim.view);
-  toast(readSetup().spawn === 'KVLYramp' ? 'Cold & dark. Shift+E auto-start, or run the checklist on the panel. ? for help.' : 'Press ? for controls.  Mixture, trim and flaps are yours.', 4000);
+  toast(readSetup().spawn === 'SFOramp' ? 'Cold & dark. Shift+E auto-start, or run the checklist on the panel. ? for help.' : 'Press ? for controls.  Mixture, trim and flaps are yours.', 4000);
   canvas.focus?.();
 };
 $('showHelp').onclick = () => $('help').classList.remove('hidden');

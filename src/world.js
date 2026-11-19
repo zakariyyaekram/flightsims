@@ -257,7 +257,7 @@ export async function buildAirports(scene, envMap, buildAircraftFn) {
     }
     // ---- buildings along far side of apron ----
     const bv = ap.v - ap.h / 2 - 14; // behind apron
-    const nH = a.icao === 'KVLY' ? 4 : 2;
+    const nH = a.icao === 'KSFO' ? 4 : 2;
     for (let i = 0; i < nH; i++) {
       const hw = 30, hd = 26, hh = 10;
       const u = ap.u - ap.w / 2 + 25 + i * 42;
@@ -381,7 +381,7 @@ export async function buildAirports(scene, envMap, buildAircraftFn) {
     const regs = [['N5284Q', 1], ['N738HP', 2], ['N12KD', 3], ['N64220', 1]];
     let i = 0;
     for (const a of AIRPORTS) {
-      const n = a.icao === 'KVLY' ? 3 : 1;
+      const n = a.icao === 'KSFO' ? 3 : 1;
       for (let k = 0; k < n; k++) {
         const [reg, sch] = regs[i++ % regs.length];
         const m = await buildAircraftFn({ envMap, reg, scheme: sch, interior: false, lights: false });
