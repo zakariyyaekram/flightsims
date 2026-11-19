@@ -13,6 +13,8 @@ import { buildLife } from './life.js';
 import { MovingMap } from './map.js';
 import { Sound } from './audio.js';
 import { setAniso } from './textures.js';
+import { ATC } from './atc.js';
+import { initCesium, syncCesiumCamera } from './cesium.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
@@ -22,6 +24,7 @@ const INHG = 3386.389;
 // ---------------- renderer / scene ----------------
 const canvas = $('gl');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true, powerPreference: 'high-performance' });
+renderer.setClearColor(0x000000, 0);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -39,41 +42,41 @@ const sim = {
   weather: { windDir: 250, windKt: 8, turb: 0.25, cover: 0.45, baseFt: 4500, visKm: 40, qnhInHg: 30.02, isa: 5 }, sound: new Sound(),
 };
 window.sim = sim; sim.scene = scene; sim.renderer = renderer;
+sim.atc = new ATC();
 const f = () => sim.fdm;
 sim.fdm.env.ground = groundQuery;
 sim.ndb = NAVAIDS.find((n) => n.type === 'NDB');
 
 let env, terrain, terrainMat, aircraft, airports, rocks, forest, grass, town, life, mmap;
 const loadBar = $('loadBar'), loadText = $('loadText');
+let loadMode = null;
 const progress = (p, t) => { loadBar.style.width = Math.round(p * 100) + '%'; loadText.textContent = t; };
 
 async function init() {
+  const loadQuality = loadMode === 'light' ? 0.35 : 1;
   progress(0.03, 'Sky, sun and atmosphere…');
   env = new Environment(renderer, scene);
   env.setTime(sim.timeOfDay);
-  progress(0.08, 'Photographic ground textures (Poly Haven)…');
-  terrainMat = await createTerrainMaterial((p) => progress(0.08 + p * 0.25, 'Photographic ground textures (Poly Haven)…'));
-  terrain = new Terrain(scene, terrainMat);
-  progress(0.36, 'Water…');
-  await env.buildWater();
+  env.sky.visible = false;
+  progress(0.08, 'Connecting to Cesium ion…');
+  await initCesium();
+  progress(0.36, 'Loading World Terrain and aerial imagery…');
+  terrain = null;
+  terrainMat = null;
+  airports = null;
+  rocks = null;
+  forest = null;
+  grass = null;
+  town = null;
+  life = null;
   progress(0.4, 'Building the Skyhawk — skin, rivets, fasteners, cabin…');
   sim.panel = new Panel();
   aircraft = await buildAircraft({ envMap: null, panelCanvas: sim.panel.canvas, reg: 'N172SP', scheme: 0, interior: true, lights: true });
   aircraft.traverse((o) => { if (o.isMesh) o.receiveShadow = true; });
   scene.add(aircraft);
   sim.panel.buildHotspots(sim);
-  progress(0.58, 'Airports, runways and lighting…');
-  airports = await buildAirports(scene, null, buildAircraft);
-  progress(0.72, 'Photoscanned rocks…');
-  rocks = new RockField(scene); await rocks.init();
-  progress(0.8, 'Forests and grass…');
-  forest = new Forest(scene, renderer); await forest.init(1);
-  grass = new GrassField(scene); await grass.init();
-  progress(0.86, 'Towns, highways and farms…');
-  town = await buildTown(scene);
-  progress(0.9, 'Traffic, people, livestock, birds and boats…');
-  life = await buildLife(scene, { houses: town.houses });
-  sim.life = life;
+  progress(0.58, 'World scene ready…');
+  sim.life = null;
   mmap = new MovingMap(); sim.mmap = mmap;
   progress(0.95, 'Charts…');
   while (!mmap.build(40)) await new Promise((r) => setTimeout(r, 0));
@@ -84,6 +87,16 @@ async function init() {
   $('setup').classList.remove('hidden');
   sim.ready = true;
 }
+
+function chooseLoadMode(mode) {
+  loadMode = mode;
+  $('loadChoice').classList.add('hidden');
+  $('loading').classList.remove('hidden');
+  if (mode === 'light') $('quality').value = 'lite';
+  init().catch((e) => { console.error(e); loadText.textContent = 'Failed to load: ' + e.message; });
+}
+$('loadLight').addEventListener('click', () => chooseLoadMode('light'));
+$('loadHeavy').addEventListener('click', () => chooseLoadMode('heavy'));
 
 // ---------------- setup / spawn ----------------
 function readSetup() {
@@ -106,6 +119,8 @@ let lastSetup = null;
 
 function applySetup(s, warmOnly = false) {
   lastSetup = s;
+  sim.atc.reset(s);
+  sim.av.com1.active = sim.atc.frequency;
   const F = sim.fdm;
   sim.weather = { windDir: s.windDir, windKt: s.windKt, turb: s.turb, cover: s.cover, baseFt: s.baseFt, visKm: s.visKm, qnhInHg: s.qnhInHg, isa: s.isa };
   sim.timeOfDay = s.tod;
@@ -115,7 +130,11 @@ function applySetup(s, warmOnly = false) {
   const q = { high: [1.75, 4096, 1.0], balanced: [1.25, 2048, 0.65], perf: [0.75, 512, 0.18], lite: [0.6, 256, 0.08] }[s.quality] || [1.25, 2048, 0.65];
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, q[0]));
   if (env.sun.shadow.mapSize.x !== q[1]) { env.sun.shadow.mapSize.set(q[1], q[1]); if (env.sun.shadow.map) { env.sun.shadow.map.dispose(); env.sun.shadow.map = null; } }
-  forest.quality = q[2]; forest.lastKey = null; rocks.quality = q[2]; rocks.lastCell = null; grass.quality = q[2]; grass.lastKey = null; life.quality = q[2]; sim.quality = s.quality;
+  if (forest) { forest.quality = q[2]; forest.lastKey = null; }
+  if (rocks) { rocks.quality = q[2]; rocks.lastCell = null; }
+  if (grass) { grass.quality = q[2]; grass.lastKey = null; }
+  if (life) life.quality = q[2];
+  sim.quality = s.quality;
   // spawn
   let pos, hdg, onGround = true, speed = 0, cold = false, pitch = 0, alt;
   const rwyStart = (a, end) => { const u = end === 0 ? -a.len / 2 + 35 : a.len / 2 - 35; const p = fromLocal(a, u, 0); return { p, hdg: end === 0 ? a.hdg : (a.hdg + 180) % 360 }; };
@@ -156,7 +175,8 @@ function applySetup(s, warmOnly = false) {
   sim.windVec = [-Math.sin(wr) * ws, 0, Math.cos(wr) * ws];
   env.setWeather({ cover: s.cover, base: s.baseFt * FT + 0, visKm: s.visKm, windDir: s.windDir, windKt: s.windKt });
   F.env.wind = sim.windVec.slice();
-  town.setNight(sim.night); life.setNight(sim.night);
+  if (town) town.setNight(sim.night);
+  if (life) life.setNight(sim.night);
   aircraft.userData.night = sim.night;
   mmap.track = [];
   sim.crashShown = false; sim.lastTD = null; sim.airTime = 0;
@@ -165,9 +185,13 @@ function applySetup(s, warmOnly = false) {
   walker.pos = null;
   // warm terrain & instanced objects around the aircraft
   const cam = new THREE.Vector3(F.pos[0], F.pos[1], F.pos[2]);
-  terrain.warm(cam, F.pos[1] - gh);
-  for (let i = 0; i < 40; i++) { forest.update(cam, 200); rocks.update(cam, 200); }
-  grass.update(cam, F.pos[1] - gh);
+  if (terrain) {
+    terrain.warm(cam, F.pos[1] - gh);
+  }
+  if (forest && rocks) {
+    for (let i = 0; i < 40; i++) { forest.update(cam, 200); rocks.update(cam, 200); }
+  }
+  if (grass) grass.update(cam, F.pos[1] - gh);
   syncAircraft(0);
   void warmOnly;
 }
@@ -210,6 +234,7 @@ window.addEventListener('keydown', (e) => {
     case 'KeyR': if (sh) { av.apButton('APR', F); toast('AP ' + av.ap.lat + (av.ap.gsArmed ? ' (GS armed)' : '')); } break;
     case 'KeyT': if (sh) { av.apButton('ALT', F); toast('AP ' + av.ap.vert); } break;
     case 'KeyY': mouse.yoke = !mouse.yoke; $('yokeChip').classList.toggle('hidden', !mouse.yoke); $('cross').classList.toggle('hidden', !mouse.yoke); toast(mouse.yoke ? 'Mouse yoke ON — mouse position = yoke' : 'Mouse yoke OFF'); break;
+    case 'KeyG': toggleATC(); break;
     case 'KeyU': $('strip').classList.toggle('hidden'); break;
     case 'KeyC': setView(views[(views.indexOf(sim.view) + 1) % views.length]); break;
     case 'Digit1': case 'Digit2': case 'Digit3': case 'Digit4': case 'Digit5': case 'Digit6': case 'Digit7': setView(views[+e.code.slice(5) - 1]); break;
@@ -513,6 +538,34 @@ function updateTip() {
   else { tip.classList.add('hidden'); canvas.style.cursor = mouse.yoke ? 'crosshair' : 'default'; }
 }
 
+function toggleATC(force) {
+  const panel = $('atcPanel');
+  const on = force ?? panel.classList.contains('hidden');
+  panel.classList.toggle('hidden', !on);
+  if (on) updateATCPanel();
+}
+
+function updateATCPanel() {
+  const atc = sim.atc;
+  $('atcStatus').textContent = atc.status;
+  $('atcSpeaker').textContent = atc.speaker;
+  $('atcMessage').textContent = atc.transmission;
+  const log = $('atcLog');
+  log.innerHTML = atc.log.map((line) => `<div class="atcLine ${line.speaker === 'YOU' ? 'you' : ''}"><b>${line.speaker}</b><span>${line.text}</span></div>`).join('');
+  log.scrollTop = log.scrollHeight;
+  const options = $('atcOptions');
+  options.replaceChildren();
+  for (const option of atc.options) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = option.label;
+    button.onclick = () => { atc.act(option.action, sim); updateATCPanel(); sim.panelDirty = true; };
+    options.appendChild(button);
+  }
+}
+
+$('atcClose').onclick = () => toggleATC(false);
+
 // ---------------- map UI ----------------
 const mapC = $('map'), miniC = $('mini');
 const mapView = { mpp: 30, center: null, follow: true, drag: null };
@@ -542,7 +595,7 @@ mapC.addEventListener('dblclick', (e) => {
   Object.assign(F.sys, keep.sys); Object.assign(F.eng, keep.eng); F.ctrl.throttle = keep.thr; F.ctrl.mixture = keep.mix; F.ctrl.trim = keep.trim; F.ctrl.parkBrake = false;
   if (air) F.trimAir(0);
   F.kollsman = Math.round(sim.weather.qnhInHg * 100) / 100;
-  terrain.warm(new THREE.Vector3(x, alt, z), alt - gh);
+  if (terrain) terrain.warm(new THREE.Vector3(x, alt, z), alt - gh);
   mmap.track = []; mapView.follow = true; mapView.center = null;
   toast('Repositioned');
 });
@@ -603,6 +656,7 @@ function frame(dtReal) {
     const powered = F.avionicsOn;
     sim.apCmd = sim.av.update(F, dt * sim.simRate, powered);
     physics(dt);
+    sim.atc.update(sim, dt * sim.simRate);
     simT += dt * sim.simRate;
     sim.timeOfDay = (lastSetup?.tod ?? 10) + simT / 3600;
     if (F.crashed && !sim.crashShown) { sim.crashShown = true; $('crashWhy').textContent = F.crashed; $('crash').classList.remove('hidden'); }
@@ -615,12 +669,15 @@ function frame(dtReal) {
   camPos.copy(camera.position);
   // world streaming
   const agl = camPos.y - heightAt(camPos.x, camPos.z);
-  terrain.update(camPos, agl, 6);
-  terrainMat.userData.uniforms.uCam.value.copy(camPos);
-  forest.update(camPos, 3); rocks.update(camPos, 3); grass.update(camPos, agl);
-  life.update(camPos, sim.paused ? 0 : dt * (sim.started ? sim.simRate : 1), t);
+  if (terrain) {
+    terrain.update(camPos, agl, 6);
+    if (terrainMat) terrainMat.userData.uniforms.uCam.value.copy(camPos);
+  }
+  if (forest && rocks) { forest.update(camPos, 3); rocks.update(camPos, 3); }
+  if (grass) grass.update(camPos, agl);
+  if (life) life.update(camPos, sim.paused ? 0 : dt * (sim.started ? sim.simRate : 1), t);
   env.update(camera, new THREE.Vector3(F.pos[0], F.pos[1], F.pos[2]), simT, dt);
-  airports.updateLights(camPos, sim.night, t);
+  if (airports) airports.updateLights(camPos, sim.night, t);
   // windsocks
   const w = sim.windVec || [0, 0, 0]; const ws = Math.hypot(w[0], w[2]);
   for (const a of AIRPORTS) if (a.windsock) { const dir = Math.atan2(-w[2], w[0]); a.windsock.rotation.set(0, dir + Math.sin(t * 2.3) * 0.08 * Math.min(1, ws / 3), -(1 - Math.min(1, ws / 7.7)) * 1.2 + Math.sin(t * 3.1) * 0.03); }
@@ -635,9 +692,14 @@ function frame(dtReal) {
   if (inside) updateTip(); else $('tip').classList.add('hidden');
   sim.sound.update(F, sim.view, sim.simRate);
   if (mmap && !mmap.done) mmap.build(2);
-  if (sim.started) { updateHUD(); drawMaps(); }
+  if (sim.started) {
+    updateHUD();
+    drawMaps();
+    if (!$('atcPanel').classList.contains('hidden')) updateATCPanel();
+  }
+  syncCesiumCamera(camera);
   if (!sim.noRender) renderer.render(scene, camera);
-  frames++; fpsT += dtReal; if (fpsT > 0.5) { fpsVal = frames / fpsT; frames = 0; fpsT = 0; if (!$('fps').classList.contains('hidden')) $('fps').textContent = `${fpsVal.toFixed(0)} fps\n${renderer.info.render.calls} calls\n${(renderer.info.render.triangles / 1e6).toFixed(2)} M tris\ntiles ${terrain.visibleCount}`; }
+  frames++; fpsT += dtReal; if (fpsT > 0.5) { fpsVal = frames / fpsT; frames = 0; fpsT = 0; if (!$('fps').classList.contains('hidden')) $('fps').textContent = `${fpsVal.toFixed(0)} fps\n${renderer.info.render.calls} calls\n${(renderer.info.render.triangles / 1e6).toFixed(2)} M tris${terrain ? `\ntiles ${terrain.visibleCount}` : ''}`; }
 }
 function loop() {
   const now = performance.now(); const dt = (now - last) / 1000; last = now;
@@ -659,5 +721,4 @@ window.render_game_to_text = () => {
   });
 };
 
-init().catch((e) => { console.error(e); loadText.textContent = 'Failed to load: ' + e.message; });
 requestAnimationFrame(loop);

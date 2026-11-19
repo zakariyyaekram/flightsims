@@ -10,10 +10,10 @@ export const TERRAIN_LAYERS = [
   'leafy_grass', 'forest_ground_04', 'rock_face_03', 'dry_ground_rocks', 'coast_sand_01', 'snow_02', 'aerial_grass_rock', 'aerial_rocks_02', 'brown_mud_leaves_01',
 ];
 
-export async function createTerrainMaterial(onProgress) {
-  const diff = await texArray(TERRAIN_LAYERS.map((n) => PH(n, 'diff')), 1024, true);
+export async function createTerrainMaterial(onProgress, size = 1024) {
+  const diff = await texArray(TERRAIN_LAYERS.map((n) => PH(n, 'diff')), size, true);
   onProgress?.(0.5);
-  const nor = await texArray(TERRAIN_LAYERS.slice(0, 6).map((n) => PH(n, 'nor_gl')), 1024, false);
+  const nor = await texArray(TERRAIN_LAYERS.slice(0, 6).map((n) => PH(n, 'nor_gl')), size, false);
   onProgress?.(1);
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, metalness: 0 });
   const uniforms = {

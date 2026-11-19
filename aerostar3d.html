@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AeroStar SR-22 — 3D Flight Simulator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <style>
+    :root { color-scheme: dark; font-family: Barlow, system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; overflow: hidden; background: #07131d; color: #e8f1f7; }
+    #scene { display: block; width: 100vw; height: 100vh; }
+    .panel { position: fixed; background: rgba(5, 14, 23, .84); border: 1px solid rgba(133, 211, 255, .3); border-radius: 10px; box-shadow: 0 10px 35px #0007; backdrop-filter: blur(8px); }
+    #top { top: 16px; left: 16px; padding: 11px 15px; }
+    #top strong { display: block; color: #8edaff; font-size: 12px; letter-spacing: .14em; }
+    #top span, #help { color: #b9c9d4; font-size: 12px; }
+    #help { top: 16px; right: 16px; padding: 11px 14px; line-height: 1.7; }
+    #help b { color: #fff; }
+    #instruments { left: 16px; bottom: 16px; width: min(680px, calc(100vw - 32px)); padding: 12px; }
+    .readouts { display: grid; grid-template-columns: repeat(6, 1fr); gap: 7px; }
+    .readout { padding: 7px 5px; background: #07111bd9; border: 1px solid #294455; border-radius: 6px; text-align: center; }
+    .readout b { display: block; color: #f3fbff; font: 700 17px Share Tech Mono, monospace; }
+    .readout i { color: #7f9bab; font-size: 9px; font-style: normal; letter-spacing: .08em; }
+    #status { margin-top: 9px; color: #9bd7a7; font: 12px Share Tech Mono, monospace; }
+    #alerts { min-height: 16px; color: #f7c873; font: 700 11px Share Tech Mono, monospace; }
+    .button { color: #dff6ff; background: #123143; border: 1px solid #4e8ca6; border-radius: 6px; padding: 6px 10px; cursor: pointer; text-decoration: none; }
+    @media (max-width: 700px) { .readouts { grid-template-columns: repeat(3, 1fr); } #help { top: auto; bottom: 190px; left: 16px; right: auto; } }
+  </style>
+</head>
+<body>
+  <a class="panel button" href="./index.html" style="right:14px;bottom:14px">← Flight Hangar</a>
+  <canvas id="scene" aria-label="3D AeroStar flight simulator view"></canvas>
+  <div id="top" class="panel"><strong>AEROSTAR SR-22 · 3D</strong><span>CALIFORNIA BAY AREA · REAL-TIME FLIGHT MODEL</span></div>
+  <div id="help" class="panel"><b>↑ / ↓</b> pitch &nbsp; <b>← / →</b> bank<br><b>A / D</b> rudder &nbsp; <b>W / S</b> throttle<br><b>Space</b> brakes &nbsp; <b>G</b> gear &nbsp; <b>F</b> flaps<br><b>V</b> cockpit view &nbsp; <b>R</b> reset</div>
+  <section id="instruments" class="panel">
+    <div class="readouts">
+      <div class="readout"><b id="ias">0</b><i>KIAS</i></div><div class="readout"><b id="alt">0</b><i>ALT FT</i></div>
+      <div class="readout"><b id="vs">0</b><i>VS FPM</i></div><div class="readout"><b id="hdg">090</b><i>HDG</i></div>
+      <div class="readout"><b id="rpm">0</b><i>RPM</i></div><div class="readout"><b id="thr">12</b><i>THR %</i></div>
+    </div>
+    <label class="airport-picker">Airport
+      <select id="airport">
+        <option value="KSFO">KSFO · San Francisco International</option>
+        <option value="KOAK">KOAK · Oakland International</option>
+        <option value="KSJC">KSJC · San Jose International</option>
+        <option value="KHWD">KHWD · Hayward Executive</option>
+        <option value="KSQL">KSQL · San Carlos</option>
+        <option value="KCCR">KCCR · Buchanan Field</option>
+      </select>
+    </label>
+    <div id="status">GEAR 3 DOWN · FLAPS UP · KSFO RUNWAY 28L</div><div id="alerts"></div>
+  </section>
+  <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+
+    const canvas = document.querySelector('#scene');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x86b9d0);
+    scene.fog = new THREE.Fog(0x86b9d0, 180, 1100);
+    const camera = new THREE.PerspectiveCamera( sixty(), innerWidth / innerHeight, .1, 3000);
+    const hemi = new THREE.HemisphereLight(0xc8e9ff, 0x3e4b35, 2.2);
+    scene.add(hemi);
+    const sun = new THREE.DirectionalLight(0xfff0cf, 3.2);
+    sun.position.set(-300, 500, 220); sun.castShadow = true; scene.add(sun);
+
+    const state = { pos: new THREE.Vector3(0, 3, 0), speed: 0, pitch: 0, bank: 0, heading: 90, throttle: .12, gear: 3, flaps: 0, brakes: false, onGround: true, vs: 0 };
+    const airports = {
+      KSFO: { name: 'San Francisco International', runway: '28L', heading: 284 },
+      KOAK: { name: 'Oakland International', runway: '30', heading: 304 },
+      KSJC: { name: 'San Jose International', runway: '30L', heading: 304 },
+      KHWD: { name: 'Hayward Executive', runway: '28L', heading: 300 },
+      KSQL: { name: 'San Carlos', runway: '30', heading: 300 },
+      KCCR: { name: 'Buchanan Field', runway: '32L', heading: 323 },
+    };
+    const keys = new Set(); let cockpit = false, last = performance.now();
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    const $ = (id) => document.getElementById(id);
+    function sixty() { return 60; }
+
+    function box(w, h, d, material, x = 0, y = 0, z = 0) {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+      mesh.position.set(x, y, z); mesh.castShadow = mesh.receiveShadow = true; return mesh;
+    }
+    function makeAircraft() {
+      const root = new THREE.Group(); root.rotation.order = 'YXZ';
+      const white = new THREE.MeshStandardMaterial({ color: 0xe7eef0, roughness: .36, metalness: .08 });
+      const blue = new THREE.MeshStandardMaterial({ color: 0x176079, roughness: .28, metalness: .15 });
+      const dark = new THREE.MeshStandardMaterial({ color: 0x101a20, roughness: .2, metalness: .25 });
+      root.add(box(1.7, .75, 4.7, white, 0, 0, 0));
+      root.add(box(1.5, .52, 1.55, blue, 0, .35, -.65));
+      root.add(box(.95, .18, 5.2, white, 0, .05, .2));
+      root.add(box(5.8, .12, .7, white, 0, .02, .25));
+      root.add(box(.14, .9, 1.35, white, 0, .55, 1.75));
+      root.add(box(2.2, .12, .48, white, 0, .58, 1.8));
+      root.add(box(1.55, .12, .55, blue, 0, .8, -1.75));
+      root.add(box(.12, .58, 1.35, white, 0, .35, -1.95));
+      const prop = new THREE.Group(); prop.position.set(0, .03, -2.42);
+      prop.add(box(.08, 2.05, .08, dark)); prop.add(box(1.8, .08, .08, dark)); root.add(prop); root.userData.prop = prop;
+      for (const x of [-.72, .72]) { const wheel = new THREE.Mesh(new THREE.CylinderGeometry(.18, .18, .12, 16), dark); wheel.rotation.z = Math.PI / 2; wheel.position.set(x, -.48, .55); root.add(wheel); }
+      scene.add(root); return root;
+    }
+    const aircraft = makeAircraft();
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(2400, 2400), new THREE.MeshStandardMaterial({ color: 0x58755e, roughness: 1 }));
+    ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+    const runway = new THREE.Mesh(new THREE.PlaneGeometry(25, 1800), new THREE.MeshStandardMaterial({ color: 0x343b40, roughness: .9 }));
+    runway.rotation.x = -Math.PI / 2; runway.position.y = .015; scene.add(runway);
+    const stripeMat = new THREE.MeshBasicMaterial({ color: 0xf3f0d7 });
+    for (let z = -850; z < 850; z += 65) { const mark = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 28), stripeMat); mark.rotation.x = -Math.PI / 2; mark.position.set(0, .03, z); scene.add(mark); }
+    for (let i = 0; i < 80; i++) {
+      const tree = new THREE.Mesh(new THREE.ConeGeometry(3 + (i % 3), 15 + (i % 4) * 2, 8), new THREE.MeshStandardMaterial({ color: 0x315846 }));
+      const side = i % 2 ? 1 : -1; tree.position.set(side * (32 + (i * 17) % 120), 7, -900 + i * 23); tree.castShadow = true; scene.add(tree);
+    }
+
+    addEventListener('keydown', (e) => { keys.add(e.code); if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault(); if (!e.repeat && e.code === 'KeyG' && state.onGround && state.speed < 35) state.gear = state.gear ? 0 : 3; if (!e.repeat && e.code === 'KeyF') state.flaps = (state.flaps + 1) % 3; if (!e.repeat && e.code === 'KeyV') cockpit = !cockpit; if (!e.repeat && e.code === 'KeyR') reset(); });
+    $('airport').addEventListener('change', reset);
+    addEventListener('keyup', (e) => keys.delete(e.code));
+    addEventListener('resize', resize); resize();
+    function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
+    function reset() { const airport = airports[$('airport').value]; Object.assign(state, { speed: 0, pitch: 0, bank: 0, heading: airport.heading, throttle: .12, gear: 3, flaps: 0, brakes: false, onGround: true, vs: 0 }); state.pos.set(0, 3, 0); }
+    function update(dt) {
+      const pitchInput = (keys.has('ArrowUp') ? 1 : 0) - (keys.has('ArrowDown') ? 1 : 0);
+      const bankInput = (keys.has('ArrowRight') ? 1 : 0) - (keys.has('ArrowLeft') ? 1 : 0);
+      const rudder = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0);
+      state.throttle = clamp(state.throttle + ((keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0)) * dt * .3, 0, 1);
+      state.brakes = keys.has('Space'); state.pitch = clamp(state.pitch + pitchInput * dt * 13 - state.pitch * dt * .18, -18, 22);
+      state.bank = clamp(state.bank + bankInput * dt * 32 - state.bank * dt * .12, -38, 38);
+      state.heading = (state.heading + (state.bank * .035 + rudder * 8) * dt + 360) % 360;
+      const thrust = state.throttle * 30, drag = state.speed * .018 + state.speed * state.speed * .0008;
+      state.speed = clamp(state.speed + (thrust - drag - (state.brakes && state.onGround ? 26 : 0)) * dt, 0, 190);
+      const climb = (state.speed > 45 ? state.pitch * .018 + state.throttle * .08 - .025 : -.08) * 32;
+      state.vs = climb * 3.281; state.pos.y += climb * dt; state.onGround = state.pos.y <= 3;
+      if (state.onGround) { state.pos.y = 3; state.speed = Math.max(0, state.speed); }
+      const r = state.heading * Math.PI / 180; state.pos.x += Math.sin(r) * state.speed * dt; state.pos.z += Math.cos(r) * state.speed * dt;
+      aircraft.position.copy(state.pos); aircraft.rotation.set(state.pitch * Math.PI / 180, r, -state.bank * Math.PI / 180);
+      aircraft.userData.prop.rotation.z += state.speed * dt * .2 + .05;
+      const target = cockpit ? new THREE.Vector3(0, .25, -1.4) : new THREE.Vector3(0, 6, 18);
+      target.applyEuler(aircraft.rotation).add(aircraft.position); camera.position.lerp(target, 1 - Math.pow(.001, dt));
+      const look = cockpit ? new THREE.Vector3(0, .2, -18) : new THREE.Vector3(0, 1, -8);
+      look.applyEuler(aircraft.rotation).add(aircraft.position); camera.lookAt(look);
+    }
+    function telemetry() {
+      $('ias').textContent = Math.round(state.speed); $('alt').textContent = Math.round((state.pos.y - 3) * 3.281).toLocaleString(); $('vs').textContent = Math.round(state.vs);
+      $('hdg').textContent = String(Math.round(state.heading) % 360).padStart(3, '0'); $('rpm').textContent = Math.round(state.throttle * 2700); $('thr').textContent = Math.round(state.throttle * 100);
+      const airport = airports[$('airport').value]; $('status').textContent = `GEAR ${state.gear ? '3 DOWN' : 'UP'} · FLAPS ${state.flaps === 0 ? 'UP' : state.flaps === 1 ? '50%' : 'FULL'} · ${$('airport').value} RUNWAY ${airport.runway} · ${cockpit ? 'COCKPIT' : 'CHASE VIEW'}`;
+      const warnings = []; if (!state.onGround && state.speed < 48) warnings.push('STALL WARNING'); if (state.brakes && !state.onGround) warnings.push('BRAKES INEFFECTIVE AIRBORNE'); $('alerts').textContent = warnings.join(' · ');
+    }
+    reset();
+    function frame(now) { const dt = Math.min(.05, (now - last) / 1000); last = now; update(dt); telemetry(); renderer.render(scene, camera); requestAnimationFrame(frame); }
+    requestAnimationFrame(frame);
+  </script>
+</body>
+</html>

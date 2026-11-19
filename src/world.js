@@ -429,7 +429,7 @@ function b64(s, T) { const bin = atob(s); const u8 = new Uint8Array(bin.length);
 
 export class RockField {
   constructor(scene) { this.scene = scene; this.types = []; this.chunks = new Map(); this.lastCell = null; this.ready = false; }
-  async init() {
+  async init(quality = 1) {
     const names = Object.keys(ROCKS);
     for (const n of names) {
       const r = ROCKS[n];
@@ -443,7 +443,7 @@ export class RockField {
       const [diff, nor, arm] = await Promise.all([tex(PHM(n, 'diff'), { wrap: false }), tex(PHM(n, 'nor_gl'), { srgb: false, wrap: false }), tex(PHM(n, 'arm'), { srgb: false, wrap: false })]);
       for (const t of [diff, nor, arm]) t.flipY = false;
       const m = new THREE.MeshStandardMaterial({ map: diff, normalMap: nor, roughnessMap: arm, aoMap: arm, metalnessMap: arm, metalness: 1, roughness: 1 });
-      const max = n === 'namaqualand_boulder_04' ? 1200 : 5000;
+      const max = Math.round((n === 'namaqualand_boulder_04' ? 1200 : 5000) * quality);
       const im = new THREE.InstancedMesh(g, m, max);
       im.count = 0; im.castShadow = true; im.receiveShadow = true; im.frustumCulled = false;
       this.scene.add(im);
@@ -675,7 +675,7 @@ export class Forest {
 // ---------------- Grass tufts near the camera ----------------
 export class GrassField {
   constructor(scene) { this.scene = scene; this.ready = false; this.lastKey = null; }
-  async init() {
+  async init(quality = 1) {
     const t = await alphaTexture(PHM('grass_medium_01', 'diff'), PHM('grass_medium_01', 'alpha'));
     // tuft regions from atlas bottom (u0,v0,u1,v1 top-origin)
     const rects = [[0.17, 0.74, 0.45, 0.86], [0.53, 0.74, 0.76, 0.86], [0.04, 0.86, 0.23, 0.98], [0.24, 0.86, 0.50, 0.98], [0.53, 0.86, 0.76, 0.98]];
@@ -693,8 +693,9 @@ export class GrassField {
     m.onBeforeCompile = (sh) => {
       sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n normal = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz); nonPerturbedNormal = normal;');
     };
-    this.im = new THREE.InstancedMesh(g, m, 42000);
-    this.im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(42000 * 3), 3); this.im.count = 0; this.im.frustumCulled = false; this.im.receiveShadow = true;
+    const max = Math.round(42000 * quality);
+    this.im = new THREE.InstancedMesh(g, m, max);
+    this.im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(max * 3), 3); this.im.count = 0; this.im.frustumCulled = false; this.im.receiveShadow = true;
     this.scene.add(this.im); this.ready = true;
   }
   // per-cell tuft lists are generated once (max density) and cached; rebuilds just copy
@@ -728,7 +729,7 @@ export class GrassField {
     this.cells = this.cells || new Map();
     const S = 16; const cx = Math.floor(cam.x / S), cz = Math.floor(cam.z / S);
     const key = cx + ',' + cz; if (key === this.lastKey) return; this.lastKey = key;
-    const R = 6, MAX = 42000; let n = 0;
+    const R = 6, MAX = this.im.instanceMatrix.count; let n = 0;
     for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
       const d2 = dx * dx + dz * dz; if (d2 > R * R) continue;
       const c = this.cell(cx + dx, cz + dz);
