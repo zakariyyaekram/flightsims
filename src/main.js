@@ -14,7 +14,7 @@ import { MovingMap } from './map.js';
 import { Sound } from './audio.js';
 import { setAniso } from './textures.js';
 import { ATC } from './atc.js';
-import { initCesium, syncCesiumCamera, getCesiumElevationWorld, warmCesiumTerrain } from './cesium.js';
+import { initCesium, syncCesiumCamera, getCesiumElevationWorld, warmCesiumTerrain } from './cesium.js?v=20261120';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
