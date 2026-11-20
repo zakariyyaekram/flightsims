@@ -1,6 +1,6 @@
 // Quadtree LOD terrain with photographic texture splatting, procedural farmland and forest canopy.
 import * as THREE from 'three';
-import { heightAt, forestAt, farmAt, WORLD_HALF, WATER_LEVEL, AIRPORTS, toLocal, townAt, TOWNS } from './geo.js';
+import { heightAt, forestAt, farmAt, WORLD_HALF, WORLD_CX, WORLD_CZ, WATER_LEVEL, townAt, pavedAt } from './geo.js';
 import { texArray, PH } from './textures.js';
 
 const N = 32; // segments per tile
@@ -137,7 +137,7 @@ vec3 gTerrainN; float gRough;
   vec3 rockC = mix(rockA * 1.05, rockD, near);
   col = mix(col, rockC, wRock);
   // ---- shoreline sand ----
-  float wSand = 1.0 - smoothstep(uWater+0.5, uWater+5.0 + m3*3., vW.y);
+  float wSand = (1.0 - smoothstep(uWater+0.3, uWater+1.6 + m3*1.2, vW.y)) * (1.0 - smoothstep(0., .3, -vCover.y));
   col = mix(col, mix(sandD*.95, vec3(.55,.5,.4), 1.-near), wSand);
   // ---- snow ----
   float wSnow = smoothstep(uSnow - 60., uSnow + 80., vW.y + (m1-.5)*260. + (m3-.5)*60.) * (1. - smoothstep(.45, .7, slope));
@@ -183,7 +183,7 @@ export class Terrain {
     this.maxTileSize = opts.maxTileSize ?? Infinity;
     this.minTileSize = opts.minTileSize ?? MIN_SIZE; // finest tile size
     this.lodScale = opts.lodScale ?? 1.35;           // lower = coarser detail falls off sooner
-    this.root = new Tile(0, 0, WORLD_HALF * 2, 0);
+    this.root = new Tile(WORLD_CX, WORLD_CZ, WORLD_HALF * 2, 0);
     this.queue = new Set();
     this.group = new THREE.Group();
     scene.add(this.group);
@@ -209,7 +209,7 @@ export class Terrain {
       pos[k * 3] = wx - t.x; pos[k * 3 + 1] = h; pos[k * 3 + 2] = wz - t.z;
       nor[k * 3] = nx / l; nor[k * 3 + 1] = 1 / l; nor[k * 3 + 2] = nz / l;
       const slope = 1 - 1 / l;
-      cov[k * 2] = forestAt(wx, wz, h, slope); cov[k * 2 + 1] = farmAt(wx, wz, h, slope); { const tw = townAt(wx, wz); if (tw > 0) { let pv = 0; for (const T of TOWNS) { const d = Math.hypot(wx - T.x, wz - T.z); const R = T.core + T.grid * 0.6; if (d < R + 40) pv = Math.max(pv, Math.min(1, (R + 40 - d) / 50)); } cov[k * 2 + 1] = -tw - pv; } }
+      cov[k * 2] = forestAt(wx, wz, h, slope); { const tw = townAt(wx, wz); cov[k * 2 + 1] = tw > 0.12 ? -(tw + (tw > 0.7 ? (tw - 0.7) * 2.6 : 0)) : farmAt(wx, wz) * (1 - tw * 4); }
       k++;
     }
     // skirts

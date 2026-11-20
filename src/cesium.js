@@ -9,7 +9,9 @@ let viewer = null;
 let enuFrame = null;
 let originECEF = null;
 let photorealisticTiles = null;
-const WORLD_ELEVATION_OFFSET = 178;
+// Cesium heights are WGS84-ellipsoidal; the simulator world uses metres above mean sea level.
+// The EGM96 geoid sits ~32 m below the ellipsoid around San Francisco Bay, so MSL = ellipsoid + 32.
+const WORLD_ELEVATION_OFFSET = 32;
 const elevationCache = new Map();
 const elevationPending = new Set();
 
@@ -179,16 +181,10 @@ export function syncCesiumCamera(camera) {
   const heading = Math.atan2(east / length, north / length);
   const pitch = Math.asin(up / length);
 
-  const localDestination = new Cesium.Cartesian3(
-    position.x,
-    -position.z,
-    position.y - 178,
-  );
-  const destination = Cesium.Matrix4.multiplyByPoint(
-    enuFrame,
-    localDestination,
-    new Cesium.Cartesian3(),
-  );
+  // map the flat simulator (x, z) to lat/lon, then place the camera at its MSL height above the
+  // curved ellipsoid (a flat ENU offset would put distant views ~200 m too high at 50 km).
+  const carto = worldToCartographic(position.x, position.z);
+  const destination = Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, position.y - WORLD_ELEVATION_OFFSET);
 
   viewer.camera.setView({
     destination,

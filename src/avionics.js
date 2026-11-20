@@ -1,5 +1,5 @@
 // Nav receivers (VOR / LOC / GS / DME), KAP 140-style two-axis autopilot.
-import { AIRPORTS, NAVAIDS, fromLocal } from './geo.js';
+import { AIRPORTS, NAVAIDS, fromLocal, runwayEnd } from './geo.js';
 
 const angDiff = (a, b) => ((a - b + 540) % 360) - 180;
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
@@ -7,16 +7,12 @@ const NM = 1852;
 
 // Build ILS stations from airport definitions
 export const ILS = [];
-for (const a of AIRPORTS) {
-  if (!a.ils) continue;
-  const end = a.ils.end; // 0: rwy[0] direction (hdg), 1: reciprocal
-  const course = end === 0 ? a.hdg : (a.hdg + 180) % 360;
-  const sgn = end === 0 ? 1 : -1;
-  // landing in direction "course": threshold at u = -sgn*len/2, localizer beyond far end u = +sgn*(len/2+300)
-  const loc = fromLocal(a, sgn * (a.len / 2 + 300), 0);
-  const gs = fromLocal(a, -sgn * (a.len / 2 - 300), sgn * 120);
-  const thr = fromLocal(a, -sgn * a.len / 2, 0);
-  ILS.push({ type: 'ILS', ident: a.ils.ident, freq: a.ils.freq, course, loc, gs, thr, elev: a.elev, airport: a, rwy: a.rwy[end] });
+for (const a of AIRPORTS) for (const r of a.runways || []) for (const il of r.ilsList || []) {
+  const e = runwayEnd(r, il.end), sgn = il.end === 0 ? 1 : -1; // sgn: landing direction along +u
+  const loc = fromLocal(r, sgn * (r.len / 2 + 300), 0);
+  const tu = e.ext + sgn * (r.disp[il.end] || 0);
+  const gs = fromLocal(r, tu + sgn * 300, sgn * 120);
+  ILS.push({ type: 'ILS', ident: il.ident, freq: il.freq, gsAngle: il.gs || 3, course: e.hdg, loc, gs, thr: { x: e.x, z: e.z }, elev: e.elev, airport: a, runway: r, rwy: e.id });
 }
 
 export function findStation(freq) {
@@ -82,7 +78,7 @@ export class Avionics {
     const elevAng = Math.atan2(altFt * 0.3048 - st.elev, gd) * 180 / Math.PI;
     if (gd < 12 * NM && Math.abs(off) < 10 && gd > 50) {
       out.gsValid = true;
-      out.gsDev = clamp((elevAng - 3.0) / 0.7, -1, 1); // + = above glidepath
+      out.gsDev = clamp((elevAng - (st.gsAngle || 3)) / 0.7, -1, 1); // + = above glidepath
     }
     out.dme = Math.hypot(dist, altFt * 0.3048 - st.elev) / NM;
     out.ident = st.ident; out.course = st.course; out.name = `${st.airport.icao} ILS ${st.rwy}`;

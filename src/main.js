@@ -1,19 +1,21 @@
 // Skyhawk — main loop, cameras, input, UI.
 import * as THREE from 'three';
-import { FDM, KT, FT, C172, C152 } from './fdm.js?v=20261121b';
+import { FDM, KT, FT, C172, C152 } from './fdm.js?v=20261122b';
 import { qrot } from './math.js';
-import { groundQuery, heightAt, AIRPORTS, NAVAIDS, fromLocal, toLocal, WATER_LEVEL } from './geo.js';
+import { groundQuery, heightAt, AIRPORTS, NAVAIDS, fromLocal, toLocal, WATER_LEVEL, findRunway, runwayEnd, inWorld, waterFrac, ll2w } from './geo.js';
 import { createTerrainMaterial, Terrain } from './terrain.js';
-import { buildAircraft, animateAircraft } from './aircraft.js?v=20261121b';
-import { Panel } from './panel.js?v=20261121b';
-import { Avionics, ILS } from './avionics.js?v=20261121b';
+import { buildAircraft, animateAircraft } from './aircraft.js?v=20261122b';
+import { Panel } from './panel.js?v=20261122b';
+import { Avionics, ILS } from './avionics.js?v=20261122b';
 import { Environment } from './env.js';
-import { buildAirports, RockField, Forest, GrassField, buildTown } from './world.js';
+import { buildAirports, RockField, Forest, GrassField } from './world.js';
+import { Scenery } from './scenery.js?v=20261122b';
+import { Traffic } from './traffic.js?v=20261122b';
 import { buildLife } from './life.js';
-import { MovingMap } from './map.js?v=20261121b';
+import { MovingMap } from './map.js?v=20261122b';
 import { Sound } from './audio.js';
 import { setAniso } from './textures.js';
-import { ATC } from './atc.js?v=20261121b';
+import { ATC } from './atc.js?v=20261122b';
 import { initCesium, syncCesiumCamera, getCesiumElevationWorld, warmCesiumTerrain } from './cesium.js?v=20261120';
 
 const $ = (id) => document.getElementById(id);
@@ -55,11 +57,12 @@ const f = () => sim.fdm;
 sim.fdm.env.ground = groundQuery;
 sim.ndb = NAVAIDS.find((n) => n.type === 'NDB');
 
-function cesiumGroundQuery(x, z) {
-  const local = groundQuery(x, z);
+function cesiumGroundQuery(x, z, y) {
+  const local = groundQuery(x, z, y);
   const cesiumHeight = getCesiumElevationWorld(x, z);
   if (!Number.isFinite(cesiumHeight)) return local;
-  const surface = cesiumHeight < WATER_LEVEL
+  if (local.road?.ys) return local; // bridge decks come from the local road data
+  const surface = waterFrac(x, z) > 0.6 && cesiumHeight < 3
     ? 'water'
     : local.surface === 'runway'
       ? 'runway'
@@ -87,7 +90,7 @@ class LocalAirports {
   update(pos) {
     const jobs = [];
     for (const a of AIRPORTS) {
-      const d = Math.hypot(a.x - pos.x, a.z - pos.z);
+      const d = Math.hypot(a.arp[0] - pos.x, a.arp[1] - pos.z);
       if (d < LIGHT_AIRPORT_LOAD && !this.loaded.has(a.icao)) {
         if (!this.loading.has(a.icao)) {
           const job = buildAirports(this.scene, null, this.buildAircraftFn, null, [a])
@@ -107,7 +110,7 @@ class LocalAirports {
 }
 
 let airportStreamTick = 0;
-let env, terrain, terrainMat, aircraft, airports, rocks, forest, grass, town, life, mmap;
+let env, terrain, terrainMat, aircraft, airports, rocks, forest, grass, town, life, mmap, scenery, traffic;
 const loadBar = $('loadBar'), loadText = $('loadText');
 let loadMode = null;
 const progress = (p, t) => { loadBar.style.width = Math.round(p * 100) + '%'; loadText.textContent = t; };
@@ -127,7 +130,7 @@ async function init() {
       sim.fdm.env.ground = cesiumGroundQuery;
       progress(0.18, 'Sampling real-world airport elevations…');
       for (const a of AIRPORTS) {
-        await warmCesiumTerrain(a.x, a.z, Math.max(a.len / 2 + 650, 1900), 300);
+        await warmCesiumTerrain(a.arp[0], a.arp[1], Math.max(a.radius + 300, 1900), 300);
       }
     }
     progress(0.36, 'Loading World Terrain, aerial imagery and 3D buildings…');
@@ -192,8 +195,14 @@ async function init() {
     progress(0.86, 'Using live aerial road and city detail…');
   } else {
     if (loadMode === 'light') {
-      progress(0.72, 'Loading lightweight airport surroundings…');
-      progress(0.80, 'Using local terrain…');
+      progress(0.72, 'Growing trees…');
+      forest = new Forest(scene, renderer);
+      await forest.init(0.45);
+      rocks = new RockField(scene);
+      await rocks.init(0.4);
+      progress(0.80, 'Laying out roads, streets and buildings…');
+      scenery = new Scenery(scene, { light: true, quality: 0.6 });
+      await scenery.init();
       progress(0.86, 'Using reduced scenery detail…');
     } else {
       const worldQuality = 0.8;
@@ -207,19 +216,24 @@ async function init() {
 
       grass = new GrassField(scene);
       await grass.init(worldQuality);
-      progress(0.86, 'Building towns and roads…');
-
-      town = await buildTown(scene);
+      progress(0.86, 'Building towns, roads and bridges…');
+      scenery = new Scenery(scene, { light: false, quality: 1 });
+      await scenery.init();
     }
   }
   progress(0.92, 'Adding vehicles and airport activity…');
-  if (loadMode !== 'light') {
-    life = await buildLife(scene);
-    sim.life = life;
-  }
+  life = await buildLife(scene, { cars: loadMode === 'light' ? 160 : 380, streets: scenery ? (x, z, r) => scenery.streetsNear(x, z, r) : null });
+  if (loadMode === 'light') life.quality = 0.55;
+  sim.life = life;
+  progress(0.93, 'Air traffic…');
+  traffic = new Traffic(scene, { light: loadMode === 'light' });
+  await traffic.init(buildAircraft);
+  traffic.setEnabled(sim.aiTrafficEnabled !== false);
+  sim.traffic = traffic; sim.scenery = scenery;
+  if (scenery) for (let i = 0; i < 60; i++) scenery.update({ x: sim.fdm.pos[0], z: sim.fdm.pos[2] });
 
   progress(0.95, 'World scene ready…');
-  mmap = new MovingMap(); sim.mmap = mmap;
+  mmap = new MovingMap(); sim.mmap = mmap; { const t0 = performance.now(); while (!mmap.build(40) && performance.now() - t0 < 4000); } mmap.traffic = () => (traffic && traffic.enabled ? traffic.list : []);
   progress(0.95, 'Charts…');
   progress(1, 'Ready');
   await new Promise((resolve) => requestAnimationFrame(resolve));
@@ -302,6 +316,7 @@ function applySetup(s, warmOnly = false) {
   sim.atc.trafficEnabled = s.aiTraffic !== false;
   sim.aiTrafficEnabled = s.aiTraffic !== false;
   if (life) life.setTrafficEnabled(sim.aiTrafficEnabled);
+  if (traffic) traffic.setEnabled(sim.aiTrafficEnabled !== false);
   sim.av.com1.active = sim.atc.frequency;
   const F = sim.fdm;
   sim.weather = { windDir: s.windDir, windKt: s.windKt, turb: s.turb, cover: s.cover, baseFt: s.baseFt, visKm: s.visKm, qnhInHg: s.qnhInHg, isa: s.isa };
@@ -319,20 +334,17 @@ function applySetup(s, warmOnly = false) {
   sim.quality = s.quality;
   // spawn
   let pos, hdg, onGround = true, speed = 0, cold = false, pitch = 0, alt;
-  const rwyStart = (a, end) => { const u = end === 0 ? -a.len / 2 + 35 : a.len / 2 - 35; const p = fromLocal(a, u, 0); return { p, hdg: end === 0 ? a.hdg : (a.hdg + 180) % 360 }; };
+  // line up just past the (displaced) threshold of a real runway end
+  const rwyStart = (icao, id) => { const f = findRunway(icao, id); const e = runwayEnd(f.r, f.e); const k = (f.r.disp[f.e] || 0) - 35; return { p: { x: e.x - e.dir[0] * k, z: e.z - e.dir[1] * k }, hdg: e.hdg }; };
   let flapsInit = 0;
-  switch (s.spawn) {
-    case 'SFO28': { const r = rwyStart(airport('KSFO'), 0); pos = r.p; hdg = r.hdg; break; }
-    case 'OAK12': { const r = rwyStart(airport('KOAK'), 1); pos = r.p; hdg = r.hdg; break; }
-    case 'SJC30': { const r = rwyStart(airport('KSJC'), 0); pos = r.p; hdg = r.hdg; break; }
-    case 'HWD28': { const r = rwyStart(airport('KHWD'), 0); pos = r.p; hdg = r.hdg; break; }
-    case 'SQL30': { const r = rwyStart(airport('KSQL'), 0); pos = r.p; hdg = r.hdg; break; }
-    case 'LVK25': { const r = rwyStart(airport('KLVK'), 0); pos = r.p; hdg = r.hdg; break; }
-    case 'CCR32': { const r = rwyStart(airport('KCCR'), 0); pos = r.p; hdg = r.hdg; break; }
-    case 'SFOramp': { const a = airport('KSFO'); const p = fromLocal(a, a.apron.u + 30, a.apron.v + 10); pos = p; hdg = (a.hdg + 90) % 360; cold = true; break; }
+  const SP = { SFO28: ['KSFO', '28L'], SFO28L: ['KSFO', '28L'], SFO1R: ['KSFO', '1R'], OAK30: ['KOAK', '30'], OAK12: ['KOAK', '12'], OAK28R: ['KOAK', '28R'], SJC30: ['KSJC', '30L'], HWD28: ['KHWD', '28L'], SQL30: ['KSQL', '30'], PAO31: ['KPAO', '31'], LVK25: ['KLVK', '25R'], CCR32: ['KCCR', '32R'], RHV31: ['KRHV', '31R'], APC36: ['KAPC', '19R'], HAF30: ['KHAF', '30'], NUQ32: ['KNUQ', '32R'], DVO31: ['KDVO', '31'], O69: ['KO69', '29'] };
+  if (SP[s.spawn]) { const r = rwyStart(...SP[s.spawn]); pos = r.p; hdg = r.hdg; }
+  else switch (s.spawn) {
+    case 'SFOramp': { const a = airport('KSFO'); pos = { x: a.ramp.x, z: a.ramp.z }; hdg = a.ramp.hdg; cold = true; break; }
     case 'ILS28': { const i = ILS.find((x) => x.ident === 'ISFO') || ILS[0]; const d = 8 * 1852; const c = i.course * D2R; pos = { x: i.thr.x - Math.sin(c) * d, z: i.thr.z + Math.cos(c) * d }; hdg = i.course; onGround = false; speed = 95; alt = Math.max(3000 * FT + (s.qnhInHg - 29.92) * 1000 * FT, i.elev + Math.tan(3 * D2R) * d + 30); pitch = 2; break; }
-    case 'cruise': { pos = { x: -6000, z: 9000 }; hdg = 75; onGround = false; speed = 108; alt = 5500 * FT; pitch = 1.5; break; }
-    default: { const r = rwyStart(airport('KSFO'), 1); pos = r.p; hdg = r.hdg; }
+    case 'cruise': { pos = ll2w(37.70, -122.30); hdg = 320; onGround = false; speed = 108; alt = 4500 * FT; pitch = 1.5; break; }
+    case 'GG': { pos = ll2w(37.79, -122.40); hdg = 300; onGround = false; speed = 100; alt = 1500 * FT; pitch = 1; break; }
+    default: { const r = rwyStart('KSFO', '28L'); pos = r.p; hdg = r.hdg; }
   }
   const localGh = heightAt(pos.x, pos.z);
   const cesiumGh = getCesiumElevationWorld(pos.x, pos.z);
@@ -358,15 +370,19 @@ function applySetup(s, warmOnly = false) {
   const av = sim.av;
   av.ap.on = false; av.ap.discAlert = 0;
   av.hdgBug = Math.round(hdg);
-  if (s.spawn === 'ILS28' || s.spawn.startsWith('SFO')) { av.nav1.active = 111.55; av.nav1.obs = 284; av.nav1.standby = 115.8; }
-  if (s.spawn === 'OAK12') { av.nav1.active = 109.30; av.nav1.obs = 120; }
-  if (s.spawn === 'SJC30') { av.nav1.active = 110.30; av.nav1.obs = 300; }
+  { // tune NAV1 to the ILS of the departure / approach runway when it has one, else the nearest VOR
+    const code = SP[s.spawn] || (s.spawn === 'ILS28' || s.spawn === 'SFOramp' ? ['KSFO', '28L'] : null);
+    const il = code ? ILS.find((i) => i.airport.icao === code[0] && i.rwy === code[1]) || ILS.find((i) => i.airport.icao === code[0]) : null;
+    let vor = null, bd = 1e12; for (const n of NAVAIDS) if (n.type === 'VOR') { const d = Math.hypot(n.x - pos.x, n.z - pos.z); if (d < bd) { bd = d; vor = n; } }
+    if (il) { av.nav1.active = il.freq; av.nav1.obs = Math.round(il.course); if (vor) av.nav1.standby = vor.freq; }
+    else if (vor) { av.nav1.active = vor.freq; av.nav1.obs = Math.round(hdg); }
+  }
   // weather
   const wr = s.windDir * D2R, ws = s.windKt * KT;
   sim.windVec = [-Math.sin(wr) * ws, 0, Math.cos(wr) * ws];
   env.setWeather({ cover: s.cover, base: s.baseFt * FT + 0, visKm: s.visKm, windDir: s.windDir, windKt: s.windKt });
   F.env.wind = sim.windVec.slice();
-  if (town) town.setNight(sim.night);
+  if (scenery) scenery.setNight(sim.night);
   if (life) life.setNight(sim.night);
   aircraft.userData.night = sim.night;
   if (mmap) mmap.track = [];
@@ -384,6 +400,7 @@ function applySetup(s, warmOnly = false) {
     for (let i = 0; i < 40; i++) { forest.update(cam, 200); rocks.update(cam, 200); }
   }
   if (grass) grass.update(cam, F.pos[1] - gh);
+  if (scenery) for (let i = 0; i < 40; i++) scenery.update(cam);
   syncAircraft(0);
   void warmOnly;
 }
@@ -482,7 +499,7 @@ window.addEventListener('keydown', (e) => {
       {
         let nearest = null, nearestDistance = Infinity;
         for (const a of AIRPORTS) {
-          const distance = Math.hypot(a.x - F.pos[0], a.z - F.pos[2]);
+          const distance = Math.hypot(a.ramp.x - F.pos[0], a.ramp.z - F.pos[2]) * 300 / 400;
           if (distance < nearestDistance) { nearestDistance = distance; nearest = a; }
         }
         if (nearestDistance >= 300) {
@@ -517,7 +534,7 @@ window.addEventListener('keydown', (e) => {
       else {
         let nearest = null, nearestDistance = Infinity;
         for (const a of AIRPORTS) {
-          const distance = Math.hypot(a.x - F.pos[0], a.z - F.pos[2]);
+          const distance = Math.hypot(a.ramp.x - F.pos[0], a.ramp.z - F.pos[2]) * 300 / 400;
           if (distance < nearestDistance) { nearestDistance = distance; nearest = a; }
         }
         if (F.onGround && nearestDistance < 300 && Math.hypot(F.vel[0], F.vel[2]) < 1) {
@@ -707,12 +724,12 @@ function physics(dt) {
     F.step(PHYS_DT); acc -= PHYS_DT; n++;
   }
   // derived
-  const g = groundQuery(F.pos[0], F.pos[2]);
+  const g = groundQuery(F.pos[0], F.pos[2], F.pos[1]);
   F.surfaceType = g.surface;
   F.agl = F.pos[1] - g.h;
   F.onGround = F.groundContact.left || F.groundContact.right || F.groundContact.nose;
   if (!F.crashed && g.surface === 'water' && F.agl < 1.0) F.crash('Ditched in the lake');
-  if (!F.crashed && (Math.abs(F.pos[0]) > 31000 || Math.abs(F.pos[2]) > 31000) && !sim.edgeWarned) { sim.edgeWarned = 1; setTimeout(() => (sim.edgeWarned = 0), 8000); toast('Edge of the scenery — turn back', 2500); }
+  if (!F.crashed && !inWorld(F.pos[0], F.pos[2], 3000) && !sim.edgeWarned) { sim.edgeWarned = 1; setTimeout(() => (sim.edgeWarned = 0), 8000); toast('Edge of the scenery — turn back', 2500); }
   // forest collision (descending into trees below 18 m in dense forest)
   // touchdown report
   if (F.onGround) { if (sim.airTime > 4 && F.touchdown && F.touchdown !== sim.lastTD) touchdownReport(F); sim.airTime = 0; }
@@ -723,11 +740,12 @@ function touchdownReport(F) {
   const td = F.touchdown;
   const fpm = Math.round(td.sink / FT * 60);
   let near = null, best = 1e9;
-  for (const a of AIRPORTS) { const l = toLocal(a, F.pos[0], F.pos[2]); if (Math.abs(l.u) < a.len / 2 + 50 && Math.abs(l.v) < 60) { const d = Math.abs(l.v); if (d < best) { best = d; near = { a, l }; } } }
+  for (const ap of AIRPORTS) for (const a of ap.runways) { const l = toLocal(a, F.pos[0], F.pos[2]); if (Math.abs(l.u) < a.len / 2 + 50 && Math.abs(l.v) < a.wid / 2 + 30) { const d = Math.abs(l.v); if (d < best) { best = d; near = { a, l }; } } }
   let msg = `Touchdown  ${fpm} fpm  ·  ${Math.round(F.ind.ias)} KIAS`;
   if (near) {
     const hdgRel = ((F.attitude.hdg - near.a.hdg + 540) % 360) - 180; const fwd = Math.abs(hdgRel) < 90;
-    const fromThr = fwd ? near.l.u + near.a.len / 2 : near.a.len / 2 - near.l.u;
+    const fromThr = (fwd ? near.l.u + near.a.len / 2 : near.a.len / 2 - near.l.u) - (near.a.disp?.[fwd ? 0 : 1] || 0);
+    msg += `\nRunway ${near.a.rwy[fwd ? 0 : 1]}`;
     msg += `\n${Math.round(fromThr / FT)} ft past threshold · ${Math.abs(near.l.v).toFixed(1)} m ${near.l.v * (fwd ? 1 : -1) > 0 ? 'right' : 'left'} of centerline`;
   } else msg += '\nOff-airport landing';
   const grade = fpm < 120 ? 'Butter' : fpm < 300 ? 'Good' : fpm < 600 ? 'Firm' : 'Hard — inspect the gear';
@@ -790,7 +808,7 @@ function updateCamera(dt, t) {
   } else if (v === 'tower') {
     camera.near = 0.5;
     let best = null, bd = 1e12;
-    for (const a of AIRPORTS) { const tp = a.towerPos || new THREE.Vector3(a.x + a.perp[0] * (a.apron.v - 40), a.elev + 12, a.z + a.perp[1] * (a.apron.v - 40)); const d = tp.distanceToSquared(acPos); if (d < bd) { bd = d; best = tp; } }
+    for (const a of AIRPORTS) { const tp = a.towerPos || new THREE.Vector3(a.towerInfo ? a.towerInfo.x : a.ramp.x, (a.towerInfo ? a.towerInfo.h : 12) + heightAt(a.ramp.x, a.ramp.z), a.towerInfo ? a.towerInfo.z : a.ramp.z); const d = tp.distanceToSquared(acPos); if (d < bd) { bd = d; best = tp; } }
     camera.position.copy(best); camera.up.set(0, 1, 0); camera.lookAt(acPos);
     const dist = Math.sqrt(bd); camera.fov = clamp(2 * Math.atan(30 / dist) / D2R, 2, 60);
   } else if (v === 'flyby') {
@@ -931,7 +949,7 @@ function drawMaps() {
     const F = sim.fdm; const r1 = sim.av.r1;
     let near = null, bd = 1e12; for (const a of AIRPORTS) { const d = Math.hypot(a.x - F.pos[0], a.z - F.pos[2]); if (d < bd) { bd = d; near = a; } }
     const brg = (Math.atan2(near.x - F.pos[0], -(near.z - F.pos[2])) / D2R + 360) % 360;
-    $('mapInfo').textContent = `POS  ${(F.pos[0] / 1852).toFixed(1)}E ${(-F.pos[2] / 1852).toFixed(1)}N NM\nALT  ${Math.round(F.ind.alt)} ft   GS ${Math.round(Math.hypot(F.vel[0], F.vel[2]) / KT)} kt   TRK ${String(Math.round((Math.atan2(F.vel[0], -F.vel[2]) / D2R + 360) % 360)).padStart(3, '0')}°\n${near.icao}  ${String(Math.round(brg)).padStart(3, '0')}° / ${(bd / 1852).toFixed(1)} NM   elev ${Math.round(near.elev / FT)} ft\nNAV1 ${sim.av.nav1.active.toFixed(2)} ${r1.valid ? (r1.ident || '') + (r1.dme != null ? '  DME ' + r1.dme.toFixed(1) : '') : '— no signal'}`;
+    $('mapInfo').textContent = `POS  ${(F.pos[0] / 1852).toFixed(1)}E ${(-F.pos[2] / 1852).toFixed(1)}N NM\nALT  ${Math.round(F.ind.alt)} ft   GS ${Math.round(Math.hypot(F.vel[0], F.vel[2]) / KT)} kt   TRK ${String(Math.round((Math.atan2(F.vel[0], -F.vel[2]) / D2R + 360) % 360)).padStart(3, '0')}°\n${near.icao}  ${String(Math.round(brg)).padStart(3, '0')}° / ${(bd / 1852).toFixed(1)} NM   elev ${Math.round(near.runways[0].elev / FT)} ft\nNAV1 ${sim.av.nav1.active.toFixed(2)} ${r1.valid ? (r1.ident || '') + (r1.dme != null ? '  DME ' + r1.dme.toFixed(1) : '') : '— no signal'}`;
   }
   if (!miniC.classList.contains('hidden')) {
     const g = miniC.getContext('2d'); g.setTransform(1, 0, 0, 1, 0, 0);
@@ -1007,11 +1025,13 @@ function frame(dtReal) {
   if (forest && rocks) { forest.update(camPos, 3); rocks.update(camPos, 3); }
   if (grass) grass.update(camPos, agl);
   if (life) life.update(camPos, sim.paused ? 0 : dt * (sim.started ? sim.simRate : 1), t);
+  if (scenery) scenery.update(camPos);
+  if (traffic) { traffic.setNight(sim.night); traffic.update(sim.paused ? 0 : dt * (sim.started ? sim.simRate : 1), camPos); }
   env.update(camera, new THREE.Vector3(F.pos[0], F.pos[1], F.pos[2]), simT, dt);
   if (airports) airports.updateLights(camPos, sim.night, t);
   // windsocks
   const w = sim.windVec || [0, 0, 0]; const ws = Math.hypot(w[0], w[2]);
-  for (const a of AIRPORTS) if (a.windsock) { const dir = Math.atan2(-w[2], w[0]); a.windsock.rotation.set(0, dir + Math.sin(t * 2.3) * 0.08 * Math.min(1, ws / 3), -(1 - Math.min(1, ws / 7.7)) * 1.2 + Math.sin(t * 3.1) * 0.03); }
+  for (const a of AIRPORTS) for (const sock of a.windsocks || (a.windsock ? [a.windsock] : [])) { const dir = Math.atan2(-w[2], w[0]); sock.rotation.set(0, dir + Math.sin(t * 2.3) * 0.08 * Math.min(1, ws / 3), -(1 - Math.min(1, ws / 7.7)) * 1.2 + Math.sin(t * 3.1) * 0.03); }
   // panel texture
   const inside = sim.view === 'cockpit' || sim.view === 'cabin';
   panelT += dt;

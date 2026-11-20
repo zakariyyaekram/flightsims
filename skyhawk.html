@@ -183,15 +183,24 @@
       <label>Start position
         <select id="spawn">
           <option value="SFO28">KSFO San Francisco — Rwy 28L, ready for takeoff</option>
-          <option value="SFOramp">KSFO San Francisco — Ramp, cold &amp; dark</option>
-          <option value="OAK12">KOAK Oakland — Rwy 12, ready for takeoff</option>
+          <option value="SFOramp">KSFO San Francisco — GA ramp, cold &amp; dark</option>
+          <option value="SFO1R">KSFO San Francisco — Rwy 1R, ready for takeoff</option>
+          <option value="OAK30">KOAK Oakland — Rwy 30, ready for takeoff</option>
+          <option value="OAK28R">KOAK Oakland — Rwy 28R (North Field), ready for takeoff</option>
           <option value="SJC30">KSJC San Jose — Rwy 30L, ready for takeoff</option>
+          <option value="PAO31">KPAO Palo Alto — Rwy 31, ready for takeoff</option>
           <option value="HWD28">KHWD Hayward — Rwy 28L, ready for takeoff</option>
           <option value="SQL30">KSQL San Carlos — Rwy 30, ready for takeoff</option>
+          <option value="RHV31">KRHV Reid-Hillview — Rwy 31R, ready for takeoff</option>
           <option value="LVK25">KLVK Livermore — Rwy 25R, ready for takeoff</option>
-          <option value="CCR32">KCCR Concord — Rwy 32L, ready for takeoff</option>
+          <option value="CCR32">KCCR Concord — Rwy 32R, ready for takeoff</option>
+          <option value="APC36">KAPC Napa — Rwy 19R, ready for takeoff</option>
+          <option value="HAF30">KHAF Half Moon Bay — Rwy 30, ready for takeoff</option>
+          <option value="DVO31">KDVO Gnoss Field — Rwy 31, ready for takeoff</option>
+          <option value="O69">O69 Petaluma — Rwy 29, ready for takeoff</option>
           <option value="ILS28">ILS 28L KSFO — 8 NM final, 3,000 ft</option>
-          <option value="cruise">Cruise 5,500 ft — over the Bay</option>
+          <option value="GG">Downtown San Francisco — 1,500 ft toward the Golden Gate</option>
+          <option value="cruise">Cruise 4,500 ft — over the Bay</option>
         </select></label>
       <label>Time of day <output id="todOut">10:00</output>
         <input id="tod" type="range" min="4" max="21.5" step="0.25" value="10" /></label>
@@ -259,7 +268,7 @@ window.startEdition = function (mode) {
     window.chooseLoadMode(mode);
     return;
   }
-  import('./src/main.js?v=20261121b').then(() => {
+  import('./src/main.js?v=20261122b').then(() => {
     if (typeof window.chooseLoadMode === 'function') window.chooseLoadMode(mode);
     else if (text) text.textContent = 'Failed to load the flight simulator.';
   }).catch((error) => {
@@ -268,7 +277,7 @@ window.startEdition = function (mode) {
   });
 };
 </script>
-<script type="module" src="./src/main.js?v=20261121b"></script>
+<script type="module" src="./src/main.js?v=20261122b"></script>
 <script data-pplx-inline-edit>
 (function () {
   if (window === window.top) return;

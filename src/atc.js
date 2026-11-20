@@ -24,14 +24,13 @@ function nearestAirport(pos) {
 }
 
 function runwayName(airport, heading) {
-  const station = STATIONS[airport.icao];
-  if (station?.runways?.length) {
-    const reciprocal = ((heading + 180) % 360);
-    return (Math.abs(((heading - airport.hdg + 540) % 360) - 180) < 90)
-      ? station.runways[0]
-      : station.runways[1] || station.runways[0];
+  // real runway end whose magnetic-ish heading best matches (longest runway wins ties)
+  let best = null, bd = 1e9;
+  for (const r of airport.runways || []) for (let e = 0; e < 2; e++) {
+    const h = e === 0 ? r.hdg : (r.hdg + 180) % 360; const d = Math.abs(((heading - h + 540) % 360) - 180) + (r === airport.runways[0] ? 0 : 3);
+    if (d < bd) { bd = d; best = r.rwy[e]; }
   }
-  return 'runway';
+  return best || STATIONS[airport.icao]?.runways?.[0] || 'runway';
 }
 
 export class ATC {
@@ -66,10 +65,11 @@ export class ATC {
   }
 
   initFromSetup(setup) {
-    const airportCode = ({ SFO28: 'KSFO', SFOramp: 'KSFO', OAK12: 'KOAK', SJC30: 'KSJC', HWD28: 'KHWD', SQL30: 'KSQL', LVK25: 'KLVK', CCR32: 'KCCR', ILS28: 'KSFO' }[setup.spawn]) || 'KSFO';
+    const SP = { SFO28: ['KSFO', '28L'], SFOramp: ['KSFO', '28L'], SFO1R: ['KSFO', '1R'], ILS28: ['KSFO', '28L'], OAK30: ['KOAK', '30'], OAK12: ['KOAK', '12'], OAK28R: ['KOAK', '28R'], SJC30: ['KSJC', '30L'], HWD28: ['KHWD', '28L'], SQL30: ['KSQL', '30'], PAO31: ['KPAO', '31'], LVK25: ['KLVK', '25R'], CCR32: ['KCCR', '32R'], RHV31: ['KRHV', '31R'], APC36: ['KAPC', '19R'], HAF30: ['KHAF', '30'], DVO31: ['KDVO', '31'], O69: ['KO69', '29'], GG: ['KSFO', '28L'], cruise: ['KOAK', '30'] };
+    const [airportCode, rwyCode] = SP[setup.spawn] || ['KSFO', '28L'];
     this.airport = AIRPORTS.find((a) => a.icao === airportCode) || this.airport;
-    const station = STATIONS[this.airport.icao] || { ground: 121.9, tower: 118.0, approach: 125.35 };
-    this.runway = runwayName(this.airport, this.airport.hdg);
+    const station = { ground: this.airport.gndFreq || 121.9, tower: this.airport.twrFreq || 118.0, approach: 125.35, class: this.airport.tower ? 'Class D' : 'Class G', ...(STATIONS[this.airport.icao] || {}) };
+    this.runway = rwyCode || runwayName(this.airport, this.airport.hdg);
 
     if (setup.spawn === 'SFOramp') {
       this.role = 'ground';
@@ -126,7 +126,7 @@ export class ATC {
       this.setATC('ATC communications are disabled. Enable Realistic ATC communications in setup.', 'RADIO', []);
       return;
     }
-    const station = STATIONS[this.airport.icao] || { ground: 121.9, tower: 118.0, approach: 125.35 };
+    const station = { ground: this.airport.gndFreq || 121.9, tower: this.airport.twrFreq || 118.0, approach: 125.35, class: this.airport.tower ? 'Class D' : 'Class G', ...(STATIONS[this.airport.icao] || {}) };
     const runway = this.runway;
     const n = sim.av.audio?.mic === 2 ? 2 : 1;
     const radio = sim.av.micRadio ? sim.av.micRadio() : sim.av.com1;

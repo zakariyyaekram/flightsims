@@ -2,7 +2,7 @@
 // Everything is GPU-instanced; limbs/wings/heads are animated in the vertex shader from per-instance phase data.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { heightAt, normalAt, surfaceAt, forestAt, farmAt, TOWNS, ROADS, townWorld, townAt, roadNear, WATER_LEVEL, AIRPORTS, toLocal, fromLocal } from './geo.js';
+import { heightAt, normalAt, surfaceAt, forestAt, farmAt, TOWNS, ROADS, townAt, roadNear, roadsInBox, WATER_LEVEL, AIRPORTS, airportAt, pavedAt, pointInPoly, waterFrac, WORLD, ll2w } from './geo.js';
 import { mulberry } from './noise.js';
 import { lightMaterial, makePoints } from './world.js';
 
@@ -524,50 +524,6 @@ export async function buildLife(scene, opts = {}) {
   const stats = {};
   let trafficEnabled = true;
 
-  const aiTrafficGroup = new THREE.Group();
-  aiTrafficGroup.name = 'aiTraffic';
-  group.add(aiTrafficGroup);
-  const aiTraffic = [];
-  const trafficMaterial = new THREE.MeshStandardMaterial({ color: 0xe9edf0, roughness: 0.7, metalness: 0.12 });
-  const trafficDark = new THREE.MeshStandardMaterial({ color: 0x26343d, roughness: 0.55, metalness: 0.25 });
-  function makeTrafficAircraft(index) {
-    const aircraft = new THREE.Group();
-    const fuselage = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.35, 10, 10), trafficMaterial);
-    fuselage.rotation.z = Math.PI / 2;
-    aircraft.add(fuselage);
-    const wings = new THREE.Mesh(new THREE.BoxGeometry(7, 0.18, 18), trafficMaterial);
-    wings.position.x = -0.5;
-    aircraft.add(wings);
-    const tail = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.14, 6), trafficMaterial);
-    tail.position.x = -4.4;
-    aircraft.add(tail);
-    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.16, 2.2, 2.8), trafficDark);
-    fin.position.set(-4.5, 1.2, 0);
-    aircraft.add(fin);
-    const navRed = new THREE.Mesh(new THREE.SphereGeometry(0.24, 6, 4), new THREE.MeshBasicMaterial({ color: 0xff3030 }));
-    navRed.position.set(-0.5, 0.2, 9);
-    aircraft.add(navRed);
-    const navGreen = new THREE.Mesh(new THREE.SphereGeometry(0.24, 6, 4), new THREE.MeshBasicMaterial({ color: 0x30ff70 }));
-    navGreen.position.set(-0.5, 0.2, -9);
-    aircraft.add(navGreen);
-    aircraft.scale.setScalar(index % 3 === 0 ? 0.9 : 0.75);
-    aircraft.visible = false;
-    aiTrafficGroup.add(aircraft);
-    return aircraft;
-  }
-  const trafficAirports = AIRPORTS.filter((a) => ['KSFO', 'KOAK', 'KSJC', 'KHWD', 'KSQL'].includes(a.icao));
-  for (let i = 0; i < 8; i++) {
-    aiTraffic.push({
-      mesh: makeTrafficAircraft(i),
-      airport: trafficAirports[i % trafficAirports.length],
-      angle: (i / 8) * Math.PI * 2,
-      radius: 3500 + (i % 4) * 1700,
-      altitude: 1200 + (i % 5) * 420,
-      speed: 35 + (i % 3) * 8,
-      headingOffset: i % 2 ? 0 : Math.PI,
-    });
-  }
-
   // ---------- vehicles
   const carMat = lifeMaterial({ glossy: true, rough: 0.6 });
   const VT = {
@@ -586,118 +542,84 @@ export async function buildLife(scene, opts = {}) {
     return r < 0.45 ? 'sedan' : r < 0.75 ? 'suv' : r < 0.93 ? 'pickup' : 'truck';
   };
   const truckBox = () => pick(rnd, [[0.92, 0.92, 0.92], [0.92, 0.92, 0.92], [0.85, 0.85, 0.82], [0.75, 0.1, 0.08], [0.1, 0.25, 0.55]]);
-  // road lanes: each lane pair forms a loop (forward lane, U-turn, reverse lane)
-  for (const r of ROADS) {
-    const N = r.line.length; const lanes = r.lanes;
-    for (let k = 0; k < lanes; k++) {
-      const off = r.kind === 'hwy' ? 1.8 + k * 3.25 : r.w * 0.25;
-      const xs = [], zs = [], ys = [];
-      for (const dir of [1, -1]) {
-        for (let q = 0; q < N; q++) {
-          const i = dir > 0 ? q : N - 1 - q;
-          const a = r.line[Math.max(0, i - 1)], b = r.line[Math.min(N - 1, i + 1)];
-          const d = norm2([(b[0] - a[0]) * dir, (b[1] - a[1]) * dir]);
-          xs.push(r.line[i][0] - d[1] * off); zs.push(r.line[i][1] + d[0] * off); ys.push(r.prof[i] + 0.18);
-        }
-      }
-      const path = new Path(Float32Array.from(xs), Float32Array.from(zs), Float32Array.from(ys));
-      const speed = r.speed * (1 + 0.1 * k) * (0.92 + rnd() * 0.12);
-      const gap = r.kind === 'hwy' ? [70, 260] : r.kind === 'road' ? [150, 550] : [450, 1500];
-      for (let s = rnd() * gap[1]; s < path.len - 20; s += gap[0] + rnd() * (gap[1] - gap[0])) {
-        const type = (r.kind === 'hwy' && k === 0 && rnd() < 0.3) ? 'truck' : pickType(r.kind);
-        cars.push({ path, s, v: speed, type, c1: pick(rnd, PAINT), c2: truckBox(), lift: true });
-      }
-    }
-  }
-  // town street loops
-  const townInfo = [];
-  for (const T of TOWNS) {
-    const tr = mulberry(T.seed * 7 + 1);
-    const W = (u, v) => townWorld(T, u, v);
-    const g = T.grid; const lim = T.r * 0.8;
-    const loops = Math.round(T.r / 75);
-    const tinfo = { T, people: [], walkPaths: [] }; townInfo.push(tinfo);
-    for (let l = 0; l < loops; l++) {
-      let u0, v0, u1, v1, tries = 0;
-      do {
-        u0 = (Math.floor(tr() * (2 * lim / g)) - Math.floor(lim / g)) * g; v0 = (Math.floor(tr() * (2 * lim / g)) - Math.floor(lim / g)) * g;
-        u1 = u0 + g * (1 + Math.floor(tr() * 5)); v1 = v0 + g * (1 + Math.floor(tr() * 5)); tries++;
-      } while (tries < 30 && [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].some(([u, v]) => u * u + v * v > lim * lim));
-      if (tries >= 30) continue;
-      let corners = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]]; if (tr() < 0.5) corners.reverse();
-      let pts = resample(corners.map(([u, v]) => { const p = W(u, v); return [p.x, p.z]; }), 2, true);
-      pts = offsetLoop(smoothLoop(pts, 4), 2.0);
-      const xs = Float32Array.from(pts.map((p) => p[0])), zs = Float32Array.from(pts.map((p) => p[1])), ys = Float32Array.from(pts.map((p) => Math.max(heightAt(p[0], p[1]), WATER_LEVEL + 0.5) + 0.24));
-      const path = new Path(xs, zs, ys);
-      const v = 8 + tr() * 4;
-      for (let s = tr() * 60; s < path.len - 10; s += 55 + tr() * 120) cars.push({ path, s, v, type: pickType('town'), c1: pick(tr, PAINT), c2: truckBox() });
-    }
-    // parked cars along downtown kerbs
-    for (let gu = -T.core; gu <= T.core; gu += g) for (let k = -T.core; k <= T.core; k += 7) {
-      if (tr() < 0.45) continue;
-      for (const side of [-1, 1]) {
-        if (tr() < 0.5) continue;
-        const p = W(gu + side * 3.0, k); const h = heightAt(p.x, p.z);
-        parked.push({ x: p.x, y: h + 0.2, z: p.z, yaw: -T.rot * Math.PI / 180 + (side > 0 ? -Math.PI / 2 : Math.PI / 2), type: tr() < 0.6 ? 'sedan' : 'suv', c1: pick(tr, PAINT), c2: [1, 1, 1] });
+  // road traffic is streamed around the camera on the real OSM network (right-hand traffic)
+  const streetsNear = opts.streets || (() => []);
+  let candMajor = [], candStreet = [], candAt = null;
+  const refreshCandidates = (cam) => {
+    candAt = { x: cam.x, z: cam.z };
+    const R = 3500; candMajor = roadsInBox(cam.x - R, cam.z - R, cam.x + R, cam.z + R);
+    candStreet = streetsNear(cam.x, cam.z, 1600);
+  };
+  const LANE = 3.5;
+  const buildCarPath = (r, cam, maxR) => {
+    const n = r.pts.length / 2; if (n < 2) return null;
+    // start at a vertex near the camera
+    let best = -1, tries = 0;
+    while (tries++ < 6) { const i = Math.floor(rnd() * (n - 1)); const dx = r.pts[i * 2] - cam.x, dz = r.pts[i * 2 + 1] - cam.z; if (dx * dx + dz * dz < maxR * maxR) { best = i; break; } }
+    if (best < 0) return null;
+    const dir = r.oneway ? 1 : rnd() < 0.5 ? 1 : -1;
+    const lanesDir = r.oneway ? r.lanes : Math.max(1, Math.floor(r.lanes / 2));
+    const lane = Math.floor(rnd() * lanesDir);
+    const off = r.oneway ? (lane + 0.5) * Math.min(LANE, r.w / r.lanes) - (r.lanes * Math.min(LANE, r.w / r.lanes)) / 2 : (lane + 0.5) * Math.min(LANE, r.w / Math.max(2, r.lanes));
+    const raw = []; let L = 0;
+    for (let k = best; k >= 0 && k < n && L < 2500; k += dir) { raw.push([r.pts[k * 2], r.pts[k * 2 + 1], r.ys ? r.ys[k] : null]); if (raw.length > 1) { const a = raw[raw.length - 2], b = raw[raw.length - 1]; L += Math.hypot(b[0] - a[0], b[1] - a[1]); } }
+    if (raw.length < 2 || L < 40) return null;
+    const xs = [], zs = [], ys = [];
+    for (let i = 0; i < raw.length - 1; i++) {
+      const a = raw[i], b = raw[i + 1]; const d = norm2([b[0] - a[0], b[1] - a[1]]); const SL = Math.hypot(b[0] - a[0], b[1] - a[1]); const m = Math.max(1, Math.ceil(SL / 14));
+      for (let j = 0; j < m; j++) {
+        const t = j / m; const x = a[0] + (b[0] - a[0]) * t - d[1] * off, z = a[1] + (b[1] - a[1]) * t + d[0] * off;
+        xs.push(x); zs.push(z); ys.push(a[2] != null ? a[2] + (b[2] - a[2]) * t + 0.2 : Math.max(heightAt(x, z), 0.8) + 0.32);
       }
     }
-    // pedestrians on block sidewalks
-    const nBlocks = []; for (let gu = -lim; gu < lim; gu += g) for (let gv = -lim; gv < lim; gv += g) { const u = Math.round(gu / g) * g, v = Math.round(gv / g) * g; if ((u + g / 2) ** 2 + (v + g / 2) ** 2 < lim * lim) nBlocks.push([u, v, Math.hypot(u + g / 2, v + g / 2) < T.core]); }
-    for (const [u, v, dt] of nBlocks) {
-      const count = dt ? 4 + Math.floor(tr() * 5) : (tr() < 0.55 ? 1 + Math.floor(tr() * 2) : 0);
-      if (!count) continue;
-      const m = 5.4; const corners = [[u + m, v + m], [u + g - m, v + m], [u + g - m, v + g - m], [u + m, v + g - m]];
-      const pts = resample(corners.map(([a, b]) => { const p = W(a, b); return [p.x, p.z]; }), 2, true);
-      const path = new Path(Float32Array.from(pts.map((p) => p[0])), Float32Array.from(pts.map((p) => p[1])), Float32Array.from(pts.map((p) => heightAt(p[0], p[1]))));
-      for (let i = 0; i < count; i++) {
-        const stand = dt && tr() < 0.25;
-        tinfo.people.push({ path, s: tr() * path.len, v: stand ? 0 : (1.05 + tr() * 0.55) * (tr() < 0.5 ? 1 : -1), ph: tr() * TAU, sc: 0.92 + tr() * 0.16, c1: pick(tr, SHIRT), c2: pick(tr, PANTS), c3: pick(tr, SKIN), turn: tr() * TAU });
-      }
+    const e = raw[raw.length - 1], p = raw[raw.length - 2], d = norm2([e[0] - p[0], e[1] - p[1]]);
+    xs.push(e[0] - d[1] * off); zs.push(e[1] + d[0] * off); ys.push(e[2] != null ? e[2] + 0.2 : Math.max(heightAt(e[0], e[1]), 0.8) + 0.32);
+    return new Path(Float32Array.from(xs), Float32Array.from(zs), Float32Array.from(ys), false);
+  };
+  const kindOf = (r) => (r.cls === 'hwy' ? 'hwy' : r.cls === 'street' ? 'town' : townAt(r.pts[0], r.pts[1]) > 0.3 ? 'town' : 'rural');
+  const spawnCar = (c, cam) => {
+    if (!candAt) refreshCandidates(cam);
+    for (let k = 0; k < 4; k++) {
+      const useStreet = candStreet.length && (rnd() < 0.4 || !candMajor.length);
+      const list = useStreet ? candStreet : candMajor; if (!list.length) break;
+      const r = useStreet ? list[Math.floor(rnd() * list.length)] : ROADS[list[Math.floor(rnd() * list.length)]];
+      const path = buildCarPath(r, cam, useStreet ? 1500 : 3200); if (!path) continue;
+      const kind = kindOf(r);
+      c.path = path; c.s = rnd() * Math.min(200, path.len * 0.5); c.v = r.speed * (0.85 + rnd() * 0.25);
+      c.type = (kind === 'hwy' && rnd() < 0.18) ? 'truck' : pickType(kind); c.c1 = pick(rnd, PAINT); c.c2 = truckBox();
+      if (c.type === 'bus') c.c1 = [0.98, 0.72, 0.05];
+      return true;
     }
-  }
-  // airport ramp people and ground-service trucks
+    c.path = null; return false;
+  };
+  const NCARS = opts.cars || 360;
+  for (let i = 0; i < NCARS; i++) cars.push({ path: null, s: 0, v: 0, type: 'sedan', c1: PAINT[0], c2: [1, 1, 1], lift: true });
+  // airport ramp people and ground-service trucks (on the real aprons near the GA ramp / terminals)
   const rampPeople = [];
-  {
-    for (const a of AIRPORTS) {
-      const ap = a.apron;
-      const tr = mulberry(31337 + a.icao.charCodeAt(0) * 100 + a.icao.charCodeAt(1) * 10 + a.icao.charCodeAt(2));
-      if (a.icao === 'KSFO') {
-        for (let i = 0; i < 9; i++) {
-          const u0 = ap.u + (tr() - 0.5) * ap.w * 0.8, v0 = ap.v + (tr() - 0.5) * ap.h * 0.7, u1 = ap.u + (tr() - 0.5) * ap.w * 0.8, v1 = ap.v - ap.h * 0.45;
-          const A = fromLocal(a, u0, v0), B = fromLocal(a, u1, v1);
-          const pts = resample([[A.x, A.z], [B.x, B.z]], 2, false); const back = pts.slice().reverse();
-          const all = pts.concat(back);
-          const path = new Path(Float32Array.from(all.map((p) => p[0])), Float32Array.from(all.map((p) => p[1])), Float32Array.from(all.map((p) => heightAt(p[0], p[1]) + 0.02)));
-          rampPeople.push({ path, s: tr() * path.len, v: i < 2 ? 0 : 1.1 + tr() * 0.4, ph: tr() * TAU, sc: 0.95 + tr() * 0.1, c1: i % 3 === 0 ? [0.95, 0.55, 0.05] : pick(tr, SHIRT), c2: pick(tr, PANTS), c3: pick(tr, SKIN), turn: tr() * TAU });
-        }
+  for (const a of AIRPORTS) {
+    const tr = mulberry(31337 + a.icao.charCodeAt(1) * 100 + a.icao.charCodeAt(2) * 10 + a.icao.charCodeAt(3));
+    const onApron = (x, z) => a.aprons.some((ap) => pointInPoly(x, z, ap.p));
+    const R = a.ramp; const fx = Math.sin(R.hdg * Math.PI / 180), fz = -Math.cos(R.hdg * Math.PI / 180);
+    const at = (u, v) => ({ x: R.x - fz * u + fx * v, z: R.z + fx * u + fz * v });
+    const isMajor = ['KSFO', 'KOAK', 'KSJC'].includes(a.icao);
+    const yaw = Math.atan2(-fz, fx);
+    const types = isMajor ? ['baggage', 'catering', 'stairs', 'gpu', 'tug', 'baggage', 'tug'] : ['gpu', 'tug', 'pickup'];
+    const COL = { baggage: [[0.95, 0.62, 0.08], [0.12, 0.35, 0.58]], catering: [[0.82, 0.84, 0.82], [0.12, 0.35, 0.58]], stairs: [[0.95, 0.62, 0.08], [0.82, 0.84, 0.82]], gpu: [[0.12, 0.35, 0.58], [0.82, 0.84, 0.82]], tug: [[0.95, 0.62, 0.08], [0.12, 0.35, 0.58]], pickup: [[0.95, 0.95, 0.92], [0.92, 0.92, 0.9]] };
+    types.forEach((type, i) => {
+      for (let k = 0; k < 6; k++) {
+        const p = at(-40 + i * 11 + (tr() - 0.5) * 6, -30 - tr() * 25);
+        if (!onApron(p.x, p.z)) continue;
+        parked.push({ x: p.x, y: heightAt(p.x, p.z) + 0.05, z: p.z, yaw: yaw + (tr() - 0.5) * 0.6, type, c1: COL[type][0], c2: COL[type][1] }); break;
       }
-      const f = fromLocal(a, ap.u + ap.w * 0.42, ap.v - ap.h * 0.2);
-      parked.push({ x: f.x, y: heightAt(f.x, f.z) + 0.05, z: f.z, yaw: Math.atan2(-a.dir[1], a.dir[0]), type: 'truck', c1: [0.85, 0.1, 0.08], c2: [0.92, 0.92, 0.9] });
-
-      const isMajor = ['KSFO', 'KOAK', 'KSJC', 'KHWD', 'KSQL'].includes(a.icao);
-      const serviceTypes = isMajor
-        ? ['baggage', 'catering', 'stairs', 'gpu', 'tug']
-        : ['baggage', 'gpu', 'tug'];
-      serviceTypes.forEach((type, i) => {
-        const p = fromLocal(a, ap.u - ap.w * 0.25 + i * 9.5, ap.v + ap.h * 0.18);
-        const colors = type === 'baggage' ? [[0.95, 0.62, 0.08], [0.12, 0.35, 0.58]]
-          : type === 'catering' ? [[0.82, 0.84, 0.82], [0.12, 0.35, 0.58]]
-          : type === 'stairs' ? [[0.95, 0.62, 0.08], [0.82, 0.84, 0.82]]
-          : type === 'gpu' ? [[0.12, 0.35, 0.58], [0.82, 0.84, 0.82]]
-          : [[0.95, 0.62, 0.08], [0.12, 0.35, 0.58]];
-        parked.push({ x: p.x, y: heightAt(p.x, p.z) + 0.05, z: p.z, yaw: Math.atan2(-a.dir[1], a.dir[0]), type, c1: colors[0], c2: colors[1] });
-      });
-      if (a.icao === 'KSFO' || a.icao === 'KOAK' || a.icao === 'KSJC') {
-        const p = fromLocal(a, ap.u - ap.w * 0.42, ap.v + ap.h * 0.25);
-        parked.push({ x: p.x, y: heightAt(p.x, p.z) + 0.1, z: p.z, yaw: Math.atan2(-a.perp[1], a.perp[0]), type: 'pickup', c1: [0.12, 0.38, 0.62], c2: [0.92, 0.92, 0.9] });
-      }
-      if (a.icao === 'KSFO') {
-        for (let i = 0; i < 14; i++) { // staff/visitor car park behind the apron
-          const p = fromLocal(a, ap.u - ap.w * 0.35 + i * 4.2, ap.v - ap.h / 2 - 22);
-          if (rnd() < 0.3) continue;
-          parked.push({ x: p.x, y: heightAt(p.x, p.z) + 0.1, z: p.z, yaw: Math.atan2(-a.perp[1], a.perp[0]), type: pickType('town'), c1: pick(rnd, PAINT), c2: [1, 1, 1] });
-        }
-      }
+    });
+    const f = at(55, -35); if (onApron(f.x, f.z)) parked.push({ x: f.x, y: heightAt(f.x, f.z) + 0.05, z: f.z, yaw, type: 'truck', c1: [0.85, 0.1, 0.08], c2: [0.92, 0.92, 0.9] });
+    const nP = isMajor ? 8 : 3;
+    for (let i = 0; i < nP; i++) {
+      const A = at((tr() - 0.5) * 80, -10 - tr() * 40), B = at((tr() - 0.5) * 80, -10 - tr() * 40);
+      if (!onApron(A.x, A.z) || !onApron(B.x, B.z)) continue;
+      const pts = resample([[A.x, A.z], [B.x, B.z]], 2, false); const all = pts.concat(pts.slice().reverse());
+      const path = new Path(Float32Array.from(all.map((p) => p[0])), Float32Array.from(all.map((p) => p[1])), Float32Array.from(all.map((p) => heightAt(p[0], p[1]) + 0.02)));
+      rampPeople.push({ path, s: tr() * path.len, v: i < 1 ? 0 : 1.1 + tr() * 0.4, ph: tr() * TAU, sc: 0.95 + tr() * 0.1, c1: i % 2 === 0 ? [0.95, 0.55, 0.05] : pick(tr, SHIRT), c2: pick(tr, PANTS), c3: pick(tr, SKIN), turn: tr() * TAU });
     }
   }
   if (opts.houses) for (const h of opts.houses) { // driveway cars
@@ -720,18 +642,21 @@ export async function buildLife(scene, opts = {}) {
   const farms = [];
   const tooClose = (x, z, d) => farms.some((f) => Math.abs(f.x - x) < d && Math.abs(f.z - z) < d && Math.hypot(f.x - x, f.z - z) < d);
   for (const r of ROADS) {
-    if (r.kind === 'hwy' && rnd() < 0.3) continue;
-    const fr = mulberry(r.name.length * 9973 + r.line.length);
-    for (let s = 300 + fr() * 600; s < r.len - 200; s += (r.kind === 'rural' ? 650 : 900) + fr() * 900) {
-      const i = Math.floor(s / 10); const a = r.line[i], b = r.line[Math.min(r.line.length - 1, i + 1)];
+    if (r.cls !== 'road' || r.len < 1200 || farms.length > 320) continue;
+    if (townAt(r.pts[0], r.pts[1]) > 0.1) continue;
+    const fr = mulberry(r.pts.length * 9973 + (r.pts[0] | 0));
+    const N = r.pts.length / 2;
+    for (let s = 300 + fr() * 600; s < r.len - 200; s += 700 + fr() * 900) {
+      let i = 0; while (i < N - 2 && r.cum[i + 1] < s) i++;
+      const a = [r.pts[i * 2], r.pts[i * 2 + 1]], b = [r.pts[i * 2 + 2], r.pts[i * 2 + 3]];
       const d = norm2([b[0] - a[0], b[1] - a[1]]); const side = fr() < 0.5 ? -1 : 1;
       const off = r.w / 2 + 55 + fr() * 50;
       const x = a[0] - d[1] * off * side, z = a[1] + d[0] * off * side;
-      const h = heightAt(x, z); if (h < WATER_LEVEL + 3) continue;
+      const h = heightAt(x, z); if (h < WATER_LEVEL + 3 || waterFrac(x, z) > 0.1) continue;
       const slope = 1 - normalAt(x, z, 25)[1]; if (slope > 0.06) continue;
-      if (farmAt(x, z, h, slope) < 0.25 && forestAt(x, z, h, slope) > 0.35) continue;
-      if (townAt(x, z) > 0.02) continue;
-      let nearApt = false; for (const ap of AIRPORTS) { const l = toLocal(ap, x, z); if (Math.abs(l.u) < ap.len / 2 + 1400 && Math.abs(l.v) < 600) nearApt = true; } if (nearApt) continue;
+      if (farmAt(x, z) < 0.35) continue;
+      if (townAt(x, z) > 0.05) continue;
+      if (airportAt(x, z)) continue;
       const rn = roadNear(x, z, 45); if (rn) continue;
       if (tooClose(x, z, 420)) continue;
       // local frame: f points from farm toward road
@@ -766,25 +691,27 @@ export async function buildLife(scene, opts = {}) {
   }
   // free-range herds in open farmland (no buildings)
   const herds = [];
-  for (let i = 0; i < 70; i++) {
-    const x = (rnd() - 0.5) * 50000, z = -6000 + rnd() * 30000; const h = heightAt(x, z);
-    if (h < WATER_LEVEL + 3) continue; const sl = 1 - normalAt(x, z, 20)[1]; if (sl > 0.08) continue;
-    if (farmAt(x, z, h, sl) < 0.4 || townAt(x, z) > 0 || roadNear(x, z, 60)) continue;
-    let nearApt = false; for (const ap of AIRPORTS) { const l = toLocal(ap, x, z); if (Math.abs(l.u) < ap.len / 2 + 600 && Math.abs(l.v) < 500) nearApt = true; } if (nearApt) continue;
+  const rx = () => WORLD.x0 + 2000 + rnd() * (WORLD.x1 - WORLD.x0 - 4000), rz = () => WORLD.z0 + 2000 + rnd() * (WORLD.z1 - WORLD.z0 - 4000);
+  for (let i = 0; i < 2500 && herds.length < 160; i++) {
+    // cattle graze the open grassland hills all around the bay
+    const x = rx(), z = rz(); const h = heightAt(x, z);
+    if (h < WATER_LEVEL + 8 || waterFrac(x, z) > 0.05) continue; const sl = 1 - normalAt(x, z, 20)[1]; if (sl > 0.1) continue;
+    if (forestAt(x, z, h, sl) > 0.15 || townAt(x, z) > 0.02 || farmAt(x, z) > 0.5 || roadNear(x, z, 60)) continue;
+    if (airportAt(x, z)) continue;
     const a = rnd() * TAU; const fx = Math.cos(a), fz = Math.sin(a);
     const pad = { cx: x, cz: z, fx, fz, lx: -fz, lz: fx, hw: 60 + rnd() * 50, hd: 40 + rnd() * 40 };
     const gx = (heightAt(x + 10, z) - heightAt(x - 10, z)) / 20, gz = (heightAt(x, z + 10) - heightAt(x, z - 10)) / 20; pad.h = (X, Z) => h + gx * (X - x) + gz * (Z - z);
     if (!padOK(pad)) continue;
-    const sp = rnd() < 0.7 ? 'cow' : 'sheep'; const breed = rnd();
+    const sp = rnd() < 0.85 ? 'cow' : 'sheep'; const breed = rnd();
     const animals = []; for (let k = 0, n = sp === 'cow' ? 6 + rnd() * 14 : 10 + rnd() * 20; k < n; k++) animals.push(newAnimal(rnd, sp, pad, breed));
     herds.push({ x, z, pad, species: sp, animals });
   }
   // deer at forest edges
-  for (let i = 0; i < 400 && herds.filter((h) => h.species === 'deer').length < 45; i++) {
-    const x = (rnd() - 0.5) * 52000, z = (rnd() - 0.5) * 40000 + 2000; const h = heightAt(x, z);
+  for (let i = 0; i < 3000 && herds.filter((h) => h.species === 'deer').length < 60; i++) {
+    const x = rx(), z = rz(); const h = heightAt(x, z);
     if (h < WATER_LEVEL + 3 || h > 1300) continue; const sl = 1 - normalAt(x, z, 15)[1]; if (sl > 0.15) continue;
     const f = forestAt(x, z, h, sl); if (f < 0.2 || f > 0.6) continue;
-    if (townAt(x, z) > 0 || roadNear(x, z, 50)) continue;
+    if (townAt(x, z) > 0.05 || roadNear(x, z, 50)) continue;
     const pad = { cx: x, cz: z, fx: 1, fz: 0, lx: 0, lz: 1, hw: 45, hd: 45 };
     const gx = (heightAt(x + 10, z) - heightAt(x - 10, z)) / 20, gz = (heightAt(x, z + 10) - heightAt(x, z - 10)) / 20; pad.h = (X, Z) => h + gx * (X - x) + gz * (Z - z);
     if (!padOK(pad)) continue;
@@ -829,12 +756,12 @@ export async function buildLife(scene, opts = {}) {
   const birdMat = lifeMaterial({ rough: 0.9 });
   const bpool = new Pool(birdGeo(), birdMat, 900); group.add(bpool.mesh);
   const flocks = [];
-  const lake = { x: 15200, z: 6600 };
-  for (let i = 0; i < 46; i++) {
+  const shore = () => { for (let k = 0; k < 200; k++) { const x = rx(), z = rz(); const w = waterFrac(x, z); if (w > 0.2 && w < 0.8) return [x, z]; } return [0, 0]; };
+  for (let i = 0; i < 70; i++) {
     let x, z, kind;
-    if (i < 8) { x = lake.x + (rnd() - 0.5) * 6000; z = lake.z + (rnd() - 0.5) * 5000; kind = 'gull'; }
-    else if (i < 18) { x = (rnd() - 0.5) * 40000; z = -12000 + rnd() * 20000; kind = 'hawk'; }
-    else { const T = pick(rnd, TOWNS); x = rnd() < 0.5 ? T.x + (rnd() - 0.5) * 4000 : (rnd() - 0.5) * 44000; z = rnd() < 0.5 ? T.z + (rnd() - 0.5) * 4000 : -6000 + rnd() * 28000; kind = 'small'; }
+    if (i < 22) { [x, z] = shore(); kind = 'gull'; }
+    else if (i < 36) { x = rx(); z = rz(); kind = 'hawk'; }
+    else { const T = pick(rnd, TOWNS); x = T.x + (rnd() - 0.5) * 4000; z = T.z + (rnd() - 0.5) * 4000; kind = 'small'; }
     const n = kind === 'hawk' ? 1 + Math.floor(rnd() * 2) : kind === 'gull' ? 6 + Math.floor(rnd() * 10) : 10 + Math.floor(rnd() * 24);
     const R = kind === 'hawk' ? 90 + rnd() * 120 : 120 + rnd() * 260;
     const birds = []; for (let k = 0; k < n; k++) birds.push({ da: (rnd() - 0.5) * (kind === 'small' ? 0.35 : 0.6), dr: (rnd() - 0.5) * 30, dy: (rnd() - 0.5) * 14, ph: rnd() * TAU, glide: 0, gt: rnd() * 3 });
@@ -844,16 +771,19 @@ export async function buildLife(scene, opts = {}) {
 
   // ---------- boats
   const boatMat = lifeMaterial({ glossy: true, rough: 0.5, double: true });
-  const sailPool = new Pool(boatGeo(true), boatMat, 30), motorPool = new Pool(boatGeo(false), boatMat, 30);
+  const sailPool = new Pool(boatGeo(true), boatMat, 70), motorPool = new Pool(boatGeo(false), boatMat, 70);
   group.add(sailPool.mesh); group.add(motorPool.mesh);
   const wakeTex = (() => { const c = document.createElement('canvas'); c.width = 64; c.height = 256; const g = c.getContext('2d'); const gr = g.createLinearGradient(0, 0, 0, 256); gr.addColorStop(0, 'rgba(255,255,255,0.85)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 256); const t = new THREE.CanvasTexture(c); return t; })();
-  const wakeMesh = new THREE.InstancedMesh(wakeGeo(), new THREE.MeshBasicMaterial({ map: wakeTex, transparent: true, depthWrite: false, side: THREE.DoubleSide, opacity: 0.55, polygonOffset: true, polygonOffsetFactor: -4 }), 30);
+  const wakeMesh = new THREE.InstancedMesh(wakeGeo(), new THREE.MeshBasicMaterial({ map: wakeTex, transparent: true, depthWrite: false, side: THREE.DoubleSide, opacity: 0.55, polygonOffset: true, polygonOffsetFactor: -4 }), 70);
   wakeMesh.frustumCulled = false; wakeMesh.count = 0; group.add(wakeMesh);
   const boats = [];
-  for (let i = 0; i < 200 && boats.length < 22; i++) {
-    const cx = lake.x + (rnd() - 0.5) * 7000, cz = lake.z + (rnd() - 0.5) * 6000; const rx = 150 + rnd() * 700, rz = 100 + rnd() * 500; const rot = rnd() * TAU;
+  // sailing / motor boats around the bay (Sausalito, Berkeley, Alameda, SF waterfront are busiest)
+  const marinas = [[37.86, -122.47], [37.81, -122.44], [37.86, -122.33], [37.78, -122.27], [37.70, -122.37], [37.58, -122.25], [38.05, -122.40], [37.88, -122.40]].map(([la, lo]) => ll2w(la, lo));
+  for (let i = 0; i < 1500 && boats.length < 60; i++) {
+    const m = marinas[i % marinas.length];
+    const cx = m.x + (rnd() - 0.5) * 6000, cz = m.z + (rnd() - 0.5) * 6000; const rx = 150 + rnd() * 900, rz = 100 + rnd() * 600; const rot = rnd() * TAU;
     let ok = true; const pts = [];
-    for (let k = 0; k < 64; k++) { const a = k / 64 * TAU; const ex = Math.cos(a) * rx, ez = Math.sin(a) * rz; const x = cx + ex * Math.cos(rot) - ez * Math.sin(rot), z = cz + ex * Math.sin(rot) + ez * Math.cos(rot); if (heightAt(x, z) > WATER_LEVEL - 1.5 || heightAt(x + 30, z) > WATER_LEVEL - 1 || heightAt(x, z + 30) > WATER_LEVEL - 1) { ok = false; break; } pts.push([x, z]); }
+    for (let k = 0; k < 64; k++) { const a = k / 64 * TAU; const ex = Math.cos(a) * rx, ez = Math.sin(a) * rz; const x = cx + ex * Math.cos(rot) - ez * Math.sin(rot), z = cz + ex * Math.sin(rot) + ez * Math.cos(rot); if (heightAt(x, z) > WATER_LEVEL - 1.5 || waterFrac(x, z) < 0.95 || waterFrac(x + 40, z) < 0.9 || waterFrac(x, z + 40) < 0.9) { ok = false; break; } pts.push([x, z]); }
     if (!ok) continue;
     const rp = resample(pts, 6, true); const sail = rnd() < 0.55;
     const path = new Path(Float32Array.from(rp.map((p) => p[0])), Float32Array.from(rp.map((p) => p[1])), new Float32Array(rp.length).fill(WATER_LEVEL));
@@ -863,10 +793,13 @@ export async function buildLife(scene, opts = {}) {
 
   // ---------- wind farm
   const turbines = [];
-  for (let row = 0; row < 3; row++) for (let k = 0; k < 11; k++) {
-    const x = -15200 + k * 620 + (row % 2) * 310, z = 14600 + row * 900; const h = heightAt(x, z);
-    if (h < WATER_LEVEL + 5 || 1 - normalAt(x, z, 30)[1] > 0.1 || roadNear(x, z, 60) || townAt(x, z) > 0) continue;
-    turbines.push({ x, y: h - 0.5, z, yaw: Math.PI * 0.08 + (rnd() - 0.5) * 0.1, a: rnd() * TAU, w: 1.45 + rnd() * 0.25 });
+  { // Shiloh / Montezuma Hills wind farms, Solano County (38.10-38.16 N, 121.78-121.88 W)
+    const c = ll2w(38.125, -121.83);
+    for (let row = 0; row < 9; row++) for (let k = 0; k < 14; k++) {
+      const x = c.x - 3600 + k * 520 + (row % 2) * 260 + (rnd() - 0.5) * 80, z = c.z - 3000 + row * 700 + (rnd() - 0.5) * 80; const h = heightAt(x, z);
+      if (x > WORLD.x1 - 50 || h < WATER_LEVEL + 5 || waterFrac(x, z) > 0.05 || 1 - normalAt(x, z, 30)[1] > 0.12 || roadNear(x, z, 60) || townAt(x, z) > 0.05) continue;
+      turbines.push({ x, y: h - 0.5, z, yaw: -Math.PI * 0.42 + (rnd() - 0.5) * 0.1, a: rnd() * TAU, w: 1.45 + rnd() * 0.25 });
+    }
   }
   const turbMat = lifeMaterial({ rough: 0.5 });
   const towerPool = new Pool(turbineGeo(), turbMat, Math.max(1, turbines.length), { cast: true }), rotorMesh = new THREE.InstancedMesh(rotorGeo(), turbMat, Math.max(1, turbines.length));
@@ -913,21 +846,8 @@ export async function buildLife(scene, opts = {}) {
   function update(cam, dt, t) {
     U_TIME.value = t; U_NIGHT.value = night;
     const camAgl = cam.y - heightAt(cam.x, cam.z);
-    for (const traffic of aiTraffic) {
-      traffic.visible = trafficEnabled;
-      if (!trafficEnabled) { traffic.mesh.visible = false; continue; }
-      traffic.angle += traffic.speed * dt / traffic.radius;
-      const ca = Math.cos(traffic.angle), sa = Math.sin(traffic.angle);
-      const x = traffic.airport.x + ca * traffic.radius;
-      const z = traffic.airport.z + sa * traffic.radius;
-      const y = traffic.airport.elev + traffic.altitude;
-      const dx = -sa, dz = ca;
-      traffic.mesh.visible = true;
-      traffic.mesh.position.set(x, y, z);
-      traffic.mesh.rotation.set(0.04 * Math.sin(t + traffic.angle), Math.atan2(-dz, dx) + traffic.headingOffset, 0);
-    }
     // vehicles
-    const vR = (3500 + Math.min(4000, camAgl * 3)) * (0.55 + 0.45 * quality); const vR2 = vR * vR;
+    const vR = (2600 + Math.min(1500, camAgl * 1.5)) * (0.55 + 0.45 * quality); const vR2 = vR * vR;
     for (const k in vpools) vpools[k].begin();
     let nl = 0; const lightsOn = night > 0.12; const lR2 = Math.min(vR2, 9000 * 9000);
     const addLights = (c, x, y, z, yaw) => {
@@ -938,10 +858,14 @@ export async function buildLife(scene, opts = {}) {
         lx = L[3]; lz = L[5] * s; vlPos[nl * 3] = x + cy * lx + sy * lz; vlPos[nl * 3 + 1] = y + L[4]; vlPos[nl * 3 + 2] = z - sy * lx + cy * lz; vlCol[nl * 3] = 1; vlCol[nl * 3 + 1] = 0.05; vlCol[nl * 3 + 2] = 0.02; vlSize[nl] = 0.8; nl++;
       }
     };
+    if (!candAt || Math.hypot(cam.x - candAt.x, cam.z - candAt.z) > 600) refreshCandidates(cam);
+    let spawns = 0;
     for (const c of cars) {
+      if (!c.path) { if (spawns++ < 25) spawnCar(c, cam); if (!c.path) continue; }
       c.s += c.v * dt;
+      if (c.s > c.path.len - 1) { c.path = null; continue; }
       const o = c.path.sample(c.s, tmp);
-      const dx = o.x - cam.x, dz = o.z - cam.z, d2 = dx * dx + dz * dz; if (d2 > vR2) continue;
+      const dx = o.x - cam.x, dz = o.z - cam.z, d2 = dx * dx + dz * dz; if (d2 > vR2 * 1.2) { c.path = null; continue; } if (d2 > vR2) continue;
       const lift = c.lift && d2 > 90000 ? Math.min(9, (Math.sqrt(d2) - 300) * 0.0016) : 0;
       vpools[c.type].push(o.x, o.y + lift, o.z, o.yaw, o.pitch, 1, 0, 0, 0, 0, c.c1, c.c2, null);
       if (d2 < lR2) addLights(c, o.x, o.y + lift, o.z, o.yaw);
@@ -965,7 +889,6 @@ export async function buildLife(scene, opts = {}) {
         ppl.push(o.x, o.y, o.z, yaw, 0, p.sc, 0, p.ph, p.v === 0 ? 0.05 : 1, 0, p.c1, p.c2, p.c3);
       }
     };
-    for (const ti of townInfo) { const d = Math.hypot(ti.T.x - cam.x, ti.T.z - cam.z); if (d < ti.T.r + hR) walkers(ti.people); }
     walkers(rampPeople);
     ppl.end(); stats.visiblePeople = ppl.n;
 
@@ -1043,7 +966,7 @@ export async function buildLife(scene, opts = {}) {
   return {
     group, stats, update,
     setNight(n) { night = n; },
-    setTrafficEnabled(enabled) { trafficEnabled = enabled; aiTrafficGroup.visible = enabled; },
+    setTrafficEnabled(enabled) { trafficEnabled = enabled; },
     set quality(q) { quality = q; lastFence = null; },
     get quality() { return quality; },
     farms, roads: ROADS, turbines, boats, herds,

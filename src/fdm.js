@@ -277,7 +277,7 @@ export class FDM {
 
   settleOnGround() {
     // place aircraft so gear springs are near static compression
-    const g = this.env.ground(this.pos[0], this.pos[2]);
+    const g = this.env.ground(this.pos[0], this.pos[2], this.pos[1]);
     this.pos[1] = g.h + 1.22 + 0.03;
     this.vel = [0, 0, 0];
   }
@@ -418,7 +418,7 @@ export class FDM {
       const g = (Math.random() + Math.random() + Math.random() - 1.5) * 2;
       ts[i] += (-ts[i] / tau[i] + g * Math.sqrt(2 / tau[i]) / Math.sqrt(dt) * 0.3) * dt;
     }
-    const agl = Math.max(1, this.pos[1] - this.env.ground(this.pos[0], this.pos[2]).h);
+    const agl = Math.max(1, this.pos[1] - this.env.ground(this.pos[0], this.pos[2], this.pos[1]).h);
     const mech = clamp(agl / 300, 0.3, 1);
     return [ts[0] * k * 1.6 * mech, ts[1] * k * 1.3 * mech, ts[2] * k * 1.6 * mech, ts[3] * k * 0.6, ts[4] * k * 0.4, ts[5] * k * 0.6];
   }
@@ -446,7 +446,7 @@ export class FDM {
 
     // wind + turbulence
     const turb = this.turbulence(dt);
-    const g0 = this.env.ground(this.pos[0], this.pos[2]);
+    const g0 = this.env.ground(this.pos[0], this.pos[2], this.pos[1]);
     const agl = this.pos[1] - g0.h;
     const wShear = clamp(Math.log(Math.max(agl, 0.5) / 0.05) / Math.log(300 / 0.05), 0.35, 1.0);
     const wind = scl(this.env.wind, wShear * (1 + (this.env.gustFactor || 0)));
@@ -660,7 +660,7 @@ export class FDM {
     for (const ct of this.contacts) {
       const rW = qrot(this.q, ct.pos);
       const p = add(this.pos, rW);
-      const g = this.env.ground(p[0], p[2]);
+      const g = this.env.ground(p[0], p[2], p[1]);
       const pen = g.h - p[1];
       ct.comp = 0;
       if (pen <= 0) { if (ct.gear) this.groundContact[ct.name] = 0; continue; }

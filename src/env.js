@@ -1,7 +1,7 @@
 // Sky (Preetham), sun/moon light, haze, cloud layers, water.
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
-import { WATER_LEVEL } from './geo.js';
+import { WATER_LEVEL, WORLD_CX, WORLD_CZ } from './geo.js';
 
 const LAT = 41.8 * Math.PI / 180; // northern Illinois-like latitude
 const DECL = 14 * Math.PI / 180; // late spring
@@ -109,7 +109,7 @@ export class Environment {
   async buildWater() {
     const loader = new THREE.TextureLoader(); loader.setCrossOrigin('anonymous');
     const nrm = await new Promise((res) => loader.load('https://cdn.jsdelivr.net/gh/mrdoob/three.js@r160/examples/textures/waternormals.jpg', res, undefined, () => res(null)));
-    if (nrm) { nrm.wrapS = nrm.wrapT = THREE.RepeatWrapping; nrm.repeat.set(1400, 1400); }
+    if (nrm) { nrm.wrapS = nrm.wrapT = THREE.RepeatWrapping; nrm.repeat.set(4200, 4200); }
     const m = new THREE.MeshStandardMaterial({ color: 0x0d2a33, roughness: 0.06, metalness: 0.0, normalMap: nrm, normalScale: new THREE.Vector2(0.35, 0.35), envMapIntensity: 1.2 });
     this.waterT = { value: 0 };
     if (nrm) m.onBeforeCompile = (sh) => {
@@ -121,8 +121,8 @@ export class Environment {
           vec3 mapN = normalize(vec3((n1.xy+n2.xy)*normalScale, n1.z*n2.z));
           normal = normalize( tbn * mapN );`);
     };
-    const w = new THREE.Mesh(new THREE.PlaneGeometry(65536, 65536, 1, 1).rotateX(-Math.PI / 2), m);
-    w.position.y = WATER_LEVEL; w.receiveShadow = true;
+    const w = new THREE.Mesh(new THREE.PlaneGeometry(196608, 196608, 1, 1).rotateX(-Math.PI / 2), m);
+    w.position.set(WORLD_CX, WATER_LEVEL, WORLD_CZ); w.receiveShadow = true;
     this.scene.add(w); this.water = w;
   }
 
