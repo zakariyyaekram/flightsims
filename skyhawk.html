@@ -259,7 +259,7 @@ window.startEdition = function (mode) {
     window.chooseLoadMode(mode);
     return;
   }
-  import('./src/main.js?v=20261121a').then(() => {
+  import('./src/main.js?v=20261121b').then(() => {
     if (typeof window.chooseLoadMode === 'function') window.chooseLoadMode(mode);
     else if (text) text.textContent = 'Failed to load the flight simulator.';
   }).catch((error) => {
@@ -268,7 +268,7 @@ window.startEdition = function (mode) {
   });
 };
 </script>
-<script type="module" src="./src/main.js?v=20261121a"></script>
+<script type="module" src="./src/main.js?v=20261121b"></script>
 <script data-pplx-inline-edit>
 (function () {
   if (window === window.top) return;

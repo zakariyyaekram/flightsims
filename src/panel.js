@@ -304,7 +304,7 @@ function smallRoundFace(g, title, lo, hi, ranges, labels, sub = '') {
 // ---------------------------------------------------------------- panel
 const CB_172_MAIN = [['FLAP', 10], ['INST', 5], ['TURN COORD', 5], ['ALT FLD', 5], ['WARN', 5], ['CABIN LT', 5], ['INST LT', 5], ['FUEL PUMP', 5], ['BCN', 5], ['LAND LT', 15], ['TAXI LT', 10], ['NAV LT', 5], ['STROBE', 5], ['PITOT HT', 10]];
 const CB_172_AVN = [['AVN BUS 1', 15], ['AVN BUS 2', 15], ['AUDIO', 5], ['NAV/COM 1', 5], ['NAV/COM 2', 5], ['ADF', 3], ['XPDR', 2], ['AUTOPILOT', 5], ['GPS', 5], ['AVN FAN', 3]];
-const CB_152 = [['ALT FLD', 5], ['INST', 5], ['TURN COORD', 5], ['FLAP', 15], ['BCN', 5], ['LAND LT', 15], ['TAXI LT', 10], ['NAV LT', 5], ['STROBE', 5], ['PITOT HT', 10], ['CABIN LT', 5], ['AVN BUS 1', 15], ['AUDIO', 5], ['NAV/COM 1', 5], ['ADF', 3], ['XPDR', 2]];
+const CB_152 = [['ALT FLD', 5], ['INST', 5], ['TURN COORD', 5], ['FLAP', 15], ['BCN', 5], ['LAND LT', 15], ['TAXI LT', 10], ['NAV LT', 5], ['STROBE', 5], ['PITOT HT', 10], ['CABIN LT', 5], ['AVN BUS 1', 15], ['AUDIO', 5], ['NAV/COM 1', 5], ['ADF', 3], ['XPDR', 2], ['GPS', 5]];
 
 export class Panel {
   constructor(type = 'C172') {
@@ -408,7 +408,7 @@ export class Panel {
     // chrome trim between panels
     const tr = g.createLinearGradient(0, 480, 0, 492); tr.addColorStop(0, '#aaa'); tr.addColorStop(0.5, '#eee'); tr.addColorStop(1, '#555');
     g.fillStyle = tr; g.fillRect(0, 480, PW, 10);
-    g.fillStyle = '#0c0c0c'; roundRect(g, this.stack.x - 10, this.stack.y - 12, this.stack.w + 20, 360, 6); g.fill();
+    g.fillStyle = '#0c0c0c'; roundRect(g, this.stack.x - 10, this.stack.y - 12, this.stack.w + 20, 450, 6); g.fill();
     engrave(g, 'N152AB', 520, 40, 16, '#eee', 'center', 700);
     engrave(g, 'MANEUVERING SPEED  104 KIAS', 270, 34, 10.5, '#ddd');
     g.fillStyle = '#c8c4b8'; roundRect(g, 1660, 330, 260, 52, 3); g.fill(); text(g, 'CESSNA  152', 1790, 346, 14, '#222', 'center', 800); text(g, 'NO INTENTIONAL SPINS — UTILITY CATEGORY', 1790, 366, 9.5, '#222', 'center', 600);
@@ -431,8 +431,8 @@ export class Panel {
     let y = this.stack.y;
     // KMA 26 audio panel
     R.kma = y; unit(y, 62, '', ''); text(g, 'KMA 26', sx + 236, y + 55, 7.5, '#c4c8cc', 'right', 700); y += 70;
-    if (type === 'C172') { R.gps = y; y += 102; R.nc1 = y; y += 128; R.nc2 = y; y += 128; } else { R.nc1 = y; y += 128; }
-    R.adf = y; y += 72; R.xpdr = y; y += 72; if (type === 'C172') { R.ap = y; y += 72; }
+    R.gps = y; y += 102; if (type === 'C172') { R.nc1 = y; y += 128; R.nc2 = y; y += 128; } else { R.nc1 = y; y += 128; }
+    const pitch = type === 'C172' ? 72 : 68; R.adf = y; y += pitch; R.xpdr = y; y += pitch; if (type === 'C172') { R.ap = y; y += 72; }
     for (const k of type === 'C172' ? ['nc1', 'nc2'] : ['nc1']) {
       const yy = R[k]; unit(yy, 120, 'BENDIX/KING', 'KX 155A  NAV/COMM');
       disp(sx + 14, yy + 10, 136, 50); disp(sx + 160, yy + 10, 136, 50);
@@ -510,7 +510,7 @@ export class Panel {
     const wrapK = (v, dk, top) => { const mhz = Math.floor(v + 1e-6); let k = Math.round((v - mhz) * 1000) + dk; if (k >= 1000) k -= 1000; if (k < 0) k += 1000; if (k > top) k = dk > 0 ? 0 : top; return Math.round((mhz + k / 1000) * 1000) / 1000; };
     if (R.gps != null) { // KLN 94
       const y = R.gps, G = () => av().gps, F = () => f();
-      const PAGES = ['NAV', 'MAP', 'NRST', 'ALT'];
+      const PAGES = ['NAV', 'MAP', 'FPL', 'NRST', 'ALT'];
       const go = (pg) => { const g = G(); if (g.page !== pg) g.prev = g.page; g.page = pg; };
       add(circ(sx + 22, y + 14, 10), 'gpsPwr', { click: () => { const g = G(); g.on = !g.on; if (g.on) g.test = 3; }, wheel: (d) => { const g = G(); g.bright = clamp(g.bright - Math.sign(d) * 0.1, 0.2, 1); }, tip: () => `GPS power / brightness — ${G().on ? 'ON' : 'OFF'} (click = power, scroll = brightness)` });
       add(rect(sx + 6, y + 34, 32, 11), 'gpsCrsrL', { click: () => { const g = G(); g.declutter = !g.declutter; }, tip: () => `Left CRSR — map declutter (${G().declutter ? 'VORs hidden' : 'all waypoints'})` });
@@ -520,11 +520,11 @@ export class Panel {
       btn(1, 'OBS', () => { const g = G(); g.mode = g.mode === 'OBS' ? 'LEG' : 'OBS'; }, () => `OBS — ${G().mode} mode (OBS: course set with the NAV 1 OBS knob)`);
       btn(2, 'ALT', () => { const g = G(); if (g.page === 'ALT') g.page = g.prev || 'NAV'; else go('ALT'); }, 'ALT — altitude / baro page');
       btn(3, 'NRST', () => { const g = G(); go('NRST'); g.sel = 0; g.cursor = true; }, 'NRST — nearest airports');
-      btn(4, 'D→', () => { const g = G(); const list = g.list || []; let w = g.page === 'NRST' && g.nrst?.[g.sel] ? g.nrst[g.sel] : g.wpt ? list.find((x) => x.ident === g.wpt.ident) : list.find((x) => x.type === 'APT'); go('DTO'); g.dtoSel = Math.max(0, list.indexOf(w)); }, 'Direct-To — pick a waypoint, then ENT');
-      btn(5, 'CLR', () => { const g = G(); if (g.page === 'DTO') g.page = g.prev || 'NAV'; else { g.page = 'NAV'; } g.cursor = false; }, 'CLR — cancel / back to NAV page');
-      btn(6, 'ENT', () => { const g = G(); if (g.page === 'DTO') av().gpsDirect(g.list?.[g.dtoSel], F()); else if (g.page === 'NRST' && g.cursor && g.nrst?.[g.sel]) { const w = g.nrst[g.sel]; go('DTO'); g.dtoSel = Math.max(0, (g.list || []).indexOf(w)); } }, 'ENT — confirm (activates Direct-To)');
+      btn(4, 'D→', () => { const g = G(); const list = g.list || []; const fw = g.page === 'FPL' && g.fpl.length ? g.fpl[g.fplActive ? g.leg : 0] : null; let w = fw ? list.find((x) => x.ident === fw.ident) : g.page === 'NRST' && g.nrst?.[g.sel] ? g.nrst[g.sel] : g.wpt ? list.find((x) => x.ident === g.wpt.ident) : list.find((x) => x.type === 'APT'); go('DTO'); g.dtoSel = Math.max(0, list.indexOf(w)); }, 'Direct-To — pick a waypoint, then ENT');
+      btn(5, 'CLR', () => { const g = G(); if (g.page === 'FPL' && g.cursor) { g.fpl.pop(); if (!g.fpl.length) g.fplActive = false; else if (g.fplActive && g.leg >= g.fpl.length) { g.leg = g.fpl.length - 1; g.wpt = { ...g.fpl[g.leg] }; } return; } if (g.page === 'DTO') g.page = g.prev || 'NAV'; else { g.page = 'NAV'; } g.cursor = false; }, () => (G().page === 'FPL' && G().cursor ? 'CLR — delete last flight plan waypoint' : 'CLR — cancel / back to NAV page'));
+      btn(6, 'ENT', () => { const g = G(); if (g.page === 'FPL') { const c = g.list?.[g.fplSel]; if (g.cursor && c) { if (g.fpl.length < 9 && g.fpl[g.fpl.length - 1]?.ident !== c.ident) g.fpl.push({ ident: c.ident, name: c.name, x: c.x, z: c.z, type: c.type }); } else av().gpsActivate(F()); return; } if (g.page === 'DTO') av().gpsDirect(g.list?.[g.dtoSel], F()); else if (g.page === 'NRST' && g.cursor && g.nrst?.[g.sel]) { const w = g.nrst[g.sel]; go('DTO'); g.dtoSel = Math.max(0, (g.list || []).indexOf(w)); } }, 'ENT — confirm (activates Direct-To)');
       add(rect(sx + 266, y + 13, 34, 13), 'gpsCrsrR', { click: () => { const g = G(); g.cursor = !g.cursor; }, tip: () => `Right CRSR — cursor ${G().cursor ? 'ON' : 'OFF'}` });
-      const inner = (dir) => { const g = G(); if (g.page === 'DTO') g.dtoSel = clamp(g.dtoSel + dir, 0, Math.max(0, (g.list?.length || 1) - 1)); else if (g.page === 'NRST') g.sel = clamp(g.sel + dir, 0, Math.max(0, (g.nrst?.length || 1) - 1)); else if (g.page === 'MAP') { const r = [2, 5, 10, 20, 40, 80]; g.range = r[clamp(r.indexOf(g.range) + dir, 0, 5)]; } else if (g.page === 'ALT') g.baro = Math.round((g.baro + dir * 0.01) * 100) / 100; else if (g.page === 'NAV') g.navSub = !g.navSub; };
+      const inner = (dir) => { const g = G(); if (g.page === 'FPL') { if (g.cursor) g.fplSel = clamp(g.fplSel + dir, 0, Math.max(0, (g.list?.length || 1) - 1)); return; } if (g.page === 'DTO') g.dtoSel = clamp(g.dtoSel + dir, 0, Math.max(0, (g.list?.length || 1) - 1)); else if (g.page === 'NRST') g.sel = clamp(g.sel + dir, 0, Math.max(0, (g.nrst?.length || 1) - 1)); else if (g.page === 'MAP') { const r = [2, 5, 10, 20, 40, 80]; g.range = r[clamp(r.indexOf(g.range) + dir, 0, 5)]; } else if (g.page === 'ALT') g.baro = Math.round((g.baro + dir * 0.01) * 100) / 100; else if (g.page === 'NAV') g.navSub = !g.navSub; };
       const outer = (dir) => { const g = G(); const i = PAGES.indexOf(g.page); go(PAGES[((i < 0 ? 0 : i) + dir + PAGES.length) % PAGES.length]); };
       add(circ(sx + 284, y + 58, 10), 'gpsInner', { click: (b) => inner(step(b)), wheel: (d) => inner(Math.sign(d)), tip: 'Right inner knob — select (waypoint / list / range / baro)' });
       add(circ(sx + 284, y + 58, 19, 10), 'gpsOuter', { click: (b) => outer(step(b)), wheel: (d) => outer(Math.sign(d)), tip: () => `Right outer knob — page (${G().page})` });
@@ -880,7 +880,7 @@ export class Panel {
     const C = { cy: '#3fd8ff', gr: '#5dff7a', wh: '#f2f2f2', mg: '#ff4fe0', yl: '#ffd84a', am: '#ffb000' };
     const T = (s, x, yy, sz = 9, c = C.wh, al = 'left', w = 700) => text(g, s, x, yy, sz, c, al, w, 'monospace');
     const p3 = (v) => String(Math.round(((v % 360) + 360) % 360) || 360).padStart(3, '0');
-    const fmtT = (sec) => (sec == null ? '--:--' : `${Math.floor(sec / 3600)}:${String(Math.floor(sec / 60) % 60).padStart(2, '0')}`);
+    const fmtT = (sec) => (sec == null ? '--:--' : sec < 3600 ? `${Math.floor(sec / 60)}:${String(Math.floor(sec) % 60).padStart(2, '0')}` : `${Math.floor(sec / 3600)}h${String(Math.floor(sec / 60) % 60).padStart(2, '0')}`);
     if (G.test > 0) {
       T('KLN 94', X + W / 2, Y + 14, 12, C.cy, 'center'); T('SELF TEST IN PROGRESS', X + W / 2, Y + 32, 8, C.wh, 'center');
       T('DATABASE: NORCAL  ' + new Date().getFullYear(), X + W / 2, Y + 44, 7.5, C.gr, 'center');
@@ -918,6 +918,8 @@ export class Panel {
       const toScr = (wx, wz) => { const ex = (wx - f.pos[0]) / 1852, nn = -(wz - f.pos[2]) / 1852; return [cx + (ex * Math.cos(ua) - nn * Math.sin(ua)) * pxNM, cy - (ex * Math.sin(ua) + nn * Math.cos(ua)) * pxNM]; };
       g.strokeStyle = 'rgba(63,216,255,0.35)'; g.lineWidth = 1; g.beginPath(); g.arc(cx, cy, 40, Math.PI, 2 * Math.PI); g.stroke();
       T(G.range + 'NM', X + W - 4, Y + 8, 7, C.cy, 'right'); T('TK ' + (G.trk == null ? '---' : p3(G.trk)), X + 4, Y + 8, 7, C.cy);
+      g.save(); g.beginPath(); g.rect(X, Y, W, H - 12); g.clip(); // keep map symbols out of the status bar
+      if (G.fpl.length > 1) { g.strokeStyle = C.wh; g.lineWidth = 1; g.beginPath(); G.fpl.forEach((w, i) => { const q = toScr(w.x, w.z); i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]); }); g.stroke(); }
       if (G.wpt) { const a = G.origin ? toScr(G.origin.x, G.origin.z) : [cx, cy], b = toScr(G.wpt.x, G.wpt.z); g.strokeStyle = C.mg; g.lineWidth = 2; g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke(); }
       for (const w of G.list || []) {
         if (w.dist > G.range * 1.6 || (G.declutter && w.type === 'VOR')) continue;
@@ -926,7 +928,21 @@ export class Panel {
         if (w.type === 'APT') g.arc(px, py, 3, 0, 7); else { g.moveTo(px - 3, py); g.lineTo(px, py - 3); g.lineTo(px + 3, py); g.lineTo(px, py + 3); g.closePath(); }
         g.stroke(); T(w.ident, px + 5, py - 4, 6.5, act ? C.mg : C.wh);
       }
+      g.restore();
       g.fillStyle = C.wh; g.beginPath(); g.moveTo(cx, cy - 5); g.lineTo(cx - 4, cy + 4); g.lineTo(cx + 4, cy + 4); g.fill();
+    } else if (page === 'FPL') {
+      T('FPL 0', X + 6, Y + 8, 7.5, C.cy); T(G.cursor ? 'EDIT' : G.fplActive ? 'ACTIVE' : G.fpl.length ? 'ENT=ACTIVATE' : 'EMPTY', X + W - 6, Y + 8, 7.5, G.fplActive && !G.cursor ? C.gr : C.yl, 'right');
+      const rows = G.fpl.map((w, i) => ({ w, i })); if (G.cursor) rows.push({ add: true });
+      const focus = G.cursor ? rows.length - 1 : G.fplActive ? G.leg : 0, top = clamp(focus - 1, 0, Math.max(0, rows.length - 3));
+      for (let k = 0; k < 3 && top + k < rows.length; k++) {
+        const r = rows[top + k], yy = Y + 20 + k * 12;
+        if (r.add) { const c = G.list?.[G.fplSel]; g.fillStyle = '#1d4f9a'; g.fillRect(X + 2, yy - 6, W - 4, 12); T(`${G.fpl.length + 1} ${c ? c.ident : '----'}`, X + 6, yy, 8.5, C.wh); T(c ? `${c.type} ${c.dist.toFixed(1)}NM  ENT=ADD` : '', X + W - 6, yy, 7.5, C.yl, 'right'); continue; }
+        const act = G.fplActive && r.i === G.leg, prev = r.i > 0 ? G.fpl[r.i - 1] : null;
+        const legD = prev ? Math.hypot(r.w.x - prev.x, r.w.z - prev.z) / 1852 : null, legC = prev ? (Math.atan2(r.w.x - prev.x, -(r.w.z - prev.z)) / DEG + 360) % 360 : null;
+        if (act) T('→', X + 4, yy, 9, C.mg);
+        T(`${r.i + 1} ${r.w.ident}`, X + 14, yy, 8.5, act ? C.mg : C.wh); T(legD == null ? '' : `${p3(legC)}° ${legD.toFixed(1)}NM`, X + W - 6, yy, 8, C.gr, 'right');
+      }
+      if (!rows.length) T('CRSR, INNER KNOB, ENT TO ADD', X + W / 2, Y + 30, 7.5, C.wh, 'center');
     } else if (page === 'NRST') {
       T('NEAREST APT', X + 6, Y + 8, 7.5, C.cy); T('BRG  DIS', X + W - 6, Y + 8, 7.5, C.cy, 'right');
       const L = G.nrst || [], top = clamp(G.sel - 1, 0, Math.max(0, L.length - 3));
@@ -1076,6 +1092,19 @@ proto.layout = function () {
     })),
   });
   // circuit breaker row
+  const dynSrc = (g, { f, av, E }) => {
+        const pw = !!E.gps && f.elec, gps = av.gps.src === 'GPS', down = this.isDown('cdiSrc');
+        const lamp = (x, w, lab, lit, col) => { g.save(); g.fillStyle = lit ? col : '#151515'; if (lit) { g.shadowColor = col; g.shadowBlur = 8; } roundRect(g, x + (down ? 0.6 : 0), 24 + (down ? 0.8 : 0), w, 18, 2); g.fill(); g.restore(); text(g, lab, x + w / 2, 33, 9, lit ? '#061006' : '#555', 'center', 800); };
+        lamp(822, 44, 'NAV', pw && !gps, '#5dff7a'); lamp(870, 44, 'GPS', pw && gps, '#5dff7a');
+        const msg = pw && av.gps.ok && av.gps.msgs.length > 0, wpt = pw && av.gps.ok && av.gps.wptAlert;
+        g.save(); for (const [x, lab, lit] of [[822, 'MSG', msg], [870, 'WPT', wpt]]) { g.fillStyle = lit ? '#ffb000' : '#1a1408'; roundRect(g, x, 45, 44, 15, 2); g.fill(); text(g, lab, x + 22, 52.5, 8, lit ? '#1a0e00' : '#4a3a1a', 'center', 800); } g.restore();
+      };
+  // NAV/GPS source switch-annunciator above CDI 1 (KLN 94 installation)
+  const cdiSrcSwitch = (X0, Y0) => { const dx = X0 - 818, dy = Y0 - 20; C.push({
+      st: (g) => { g.save(); g.translate(dx, dy); g.fillStyle = '#070707'; roundRect(g, 818, 20, 100, 44, 4); g.fill(); engrave(g, 'CDI 1 SOURCE', 868, 70, 7, '#cfcfca'); g.restore(); },
+      dyn: (g, c) => { g.save(); g.translate(dx, dy); dynSrc(g, c); g.restore(); },
+      hot: (add, sim) => add(rect(X0, Y0, 100, 44), 'cdiSrc', { click: () => { const G = sim.av.gps; G.src = G.src === 'GPS' ? 'NAV' : 'GPS'; }, tip: () => `NAV/GPS switch — CDI 1 and autopilot NAV follow ${sim.av.gps.src === 'GPS' ? 'the GPS' : 'NAV 1'} (click to swap)` }),
+    }); };
   const breakers = (list, x0, y0, dx, perRow = 99, dy = 62) => list.forEach(([name, amps], i) => {
     const x = x0 + (i % perRow) * dx, y = y0 + Math.floor(i / perRow) * dy;
     C.push({
@@ -1153,18 +1182,7 @@ proto.layout = function () {
       engrave(g, 'CABIN AIR', 1850, 760, 10, '#eee', 'center', 700); engrave(g, 'PULL ON', 1850, 846, 8, '#cfcfca');
     } });
     this.flapPanel(C, 1384, 640, [640, 685, 730, 775]);
-    // NAV/GPS source switch-annunciator above CDI 1 (KLN 94 installation)
-    C.push({
-      st: (g) => { g.fillStyle = '#070707'; roundRect(g, 818, 20, 100, 44, 4); g.fill(); engrave(g, 'CDI 1 SOURCE', 868, 70, 7, '#cfcfca'); },
-      dyn: (g, { f, av, E }) => {
-        const pw = !!E.gps && f.elec, gps = av.gps.src === 'GPS', down = this.isDown('cdiSrc');
-        const lamp = (x, w, lab, lit, col) => { g.save(); g.fillStyle = lit ? col : '#151515'; if (lit) { g.shadowColor = col; g.shadowBlur = 8; } roundRect(g, x + (down ? 0.6 : 0), 24 + (down ? 0.8 : 0), w, 18, 2); g.fill(); g.restore(); text(g, lab, x + w / 2, 33, 9, lit ? '#061006' : '#555', 'center', 800); };
-        lamp(822, 44, 'NAV', pw && !gps, '#5dff7a'); lamp(870, 44, 'GPS', pw && gps, '#5dff7a');
-        const msg = pw && av.gps.ok && av.gps.msgs.length > 0, wpt = pw && av.gps.ok && av.gps.wptAlert;
-        g.save(); for (const [x, lab, lit] of [[822, 'MSG', msg], [870, 'WPT', wpt]]) { g.fillStyle = lit ? '#ffb000' : '#1a1408'; roundRect(g, x, 45, 44, 15, 2); g.fill(); text(g, lab, x + 22, 52.5, 8, lit ? '#1a0e00' : '#4a3a1a', 'center', 800); } g.restore();
-      },
-      hot: (add, sim) => add(rect(818, 20, 100, 44), 'cdiSrc', { click: () => { const G = sim.av.gps; G.src = G.src === 'GPS' ? 'NAV' : 'GPS'; }, tip: () => `NAV/GPS switch — CDI 1 and autopilot NAV follow ${sim.av.gps.src === 'GPS' ? 'the GPS' : 'NAV 1'} (click to swap)` }),
-    });
+    cdiSrcSwitch(818, 20);
     this.hourMeter(C, 1440, 130);
     this.eltSwitch(C, 1440, 60);
     this.glovebox(C, 1640, 430, 370, 220, rect);
@@ -1191,8 +1209,9 @@ proto.layout = function () {
     split(130, 790, ['alternator', 'master'], ['ALT', 'BAT'], 'MASTER', 'red', (s, k) => { if (k === 'alternator' && s.alternator) s.master = true; if (k === 'master' && !s.master) s.alternator = false; });
     const sw = [['avionics', 'AVN', 'POWER'], ['beacon', 'BCN'], ['landing', 'LAND'], ['taxi', 'TAXI'], ['nav', 'NAV'], ['strobe', 'STROBE'], ['pitotHeat', 'PITOT', 'HEAT']];
     sw.forEach(([k, l, sub], i) => rocker(312 + i * 50, 790, k, l, { sub, color: 'white' }));
-    breakers(CB_152, 300, 948, 56);
-    C.push({ st: (g) => engrave(g, 'CIRCUIT BREAKERS — PUSH TO RESET', 720, 1008, 9, '#eee') });
+    breakers(CB_152, 244, 948, 56);
+    cdiSrcSwitch(760, 22);
+    C.push({ st: (g) => engrave(g, 'CIRCUIT BREAKERS — PUSH TO RESET', 692, 1008, 9, '#eee') });
     this.dimmer(C, 1440, 860, 'panelDim', 'radioDim', 'PANEL LT', 'RADIO LT', circ);
     this.flapPanel(C, 1330, 690, [690, 735, 780, 825]);
     this.glovebox(C, 1640, 560, 370, 200, rect);

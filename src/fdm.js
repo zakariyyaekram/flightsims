@@ -63,6 +63,7 @@ export const C172 = {
 };
 
 export const C152 = {
+  rollRig: 0.105, // aileron/wing rigging, set so cruise is hands-off neutral
   emptyMass: 504, // kg (1,111 lb)
   wingArea: 14.9, span: 10.16, AR: 6.93,
   inertia: [700, 1200, 1000],
@@ -471,7 +472,9 @@ export class FDM {
     addTo(F, pf.F); addTo(M, pf.M);
     // engine torque reaction on airframe
     const Qeng = this.engineTorque(dt, atm, vB[0]);
-    addTo(M, [-Qeng * 0.92 * 1, 0, 0]);
+    // roughly half of the shaft torque is returned by the rotating slipstream acting on the wing roots and
+    // fuselage (it raises the left wing's angle of attack), so the net torque roll is about 0.5 Q
+    addTo(M, [-Qeng * 0.5, 0, 0]);
     // prop rpm dynamics
     const Iprop = 2.1;
     e.propOmega += (Qeng - pf.Q) / Iprop * dt;
@@ -484,7 +487,7 @@ export class FDM {
     const swirl = e.rpm > 200 ? clamp(e.propTorque / (atm.rho * Math.PI * this.aircraft.propRadius ** 2 * Math.max(tas + washV, 5) ** 2 * 0.6), -0.4, 0.4) : 0;
 
     // wing/aileron rigging (wash-in on left wing) — trims out torque roll at cruise, like the real airframe
-    addTo(M, [0.137 * 0.5 * atm.rho * tas * tas, 0, 0]);
+    addTo(M, [(this.aircraft.rollRig ?? 0.12) * 0.5 * atm.rho * tas * tas, 0, 0]);
 
     // aerodynamic surfaces
     let CLw = 0, wingLift = 0;
@@ -503,7 +506,7 @@ export class FDM {
         const dwA = this.downwash;
         vLoc = add(vLoc, [0, Math.sin(dwA) * len(vLoc), 0]); // air moving down => relative flow from above
       }
-      if (el.kind === 'vtail' && el.prop) vLoc = add(vLoc, [0, 0, -swirl * (tas + washV) * 0.3]); // slipstream swirl hits left side of fin
+      if (el.kind === 'vtail' && el.prop) vLoc = add(vLoc, [0, 0, -swirl * (tas + washV) * 0.15]); // slipstream swirl hits left side of fin
       // remove spanwise flow
       const sp = el.span;
       const vSpan = dot(vLoc, sp);
@@ -755,7 +758,7 @@ export class FDM {
     // avionics: 172S bus 1 = NAV/COM 1, audio; bus 2 = NAV/COM 2, ADF, XPDR, autopilot (simplified)
     const b1 = this.elec && bus1, b2 = this.elec && bus2;
     E.audio = (b1 || b2) && cb('AUDIO'); E.com1 = b1 && cb('NAV/COM 1'); E.com2 = two && b2 && cb('NAV/COM 2');
-    E.adf = (two ? b2 : b1) && cb('ADF'); E.xpdr = (two ? b2 : b1) && cb('XPDR'); E.ap = two && b2 && cb('AUTOPILOT'); E.gps = two && b1 && cb('GPS');
+    E.adf = (two ? b2 : b1) && cb('ADF'); E.xpdr = (two ? b2 : b1) && cb('XPDR'); E.ap = two && b2 && cb('AUTOPILOT'); E.gps = b1 && cb('GPS');
     this.avionicsOn = b1 || b2;
     // gyros: AI & HI vacuum-driven, TC electric
     const vacOK = e.vac > 3.8;

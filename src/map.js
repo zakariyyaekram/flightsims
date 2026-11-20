@@ -1,6 +1,6 @@
 // Moving map: shaded relief + hypsometric tints, airports, navaids, ILS feathers, track, range rings.
 import { heightAt, AIRPORTS, NAVAIDS, WATER_LEVEL, WORLD_HALF, TOWN, TOWNS, ROADS, forestAt, fromLocal } from './geo.js';
-import { ILS } from './avionics.js?v=20261121a';
+import { ILS } from './avionics.js?v=20261121b';
 
 const RES = 512; // relief raster
 const EXT = 26000; // map shows +-EXT m

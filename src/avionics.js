@@ -42,7 +42,7 @@ export class Avionics {
     this.r1 = {}; this.r2 = {};
     // Bendix/King KLN 94 GPS (172S only). src = CDI 1 source selected by the NAV/GPS switch.
     this.gps = { on: true, bright: 0.8, test: 3, page: 'NAV', prev: 'NAV', mode: 'LEG', range: 10, declutter: false, cursor: false, sel: 0, dtoSel: 0,
-      wpt: null, origin: null, src: 'NAV', baro: 29.92, msgs: [], arrived: false };
+      wpt: null, origin: null, src: 'NAV', baro: 29.92, msgs: [], arrived: false, fpl: [], fplActive: false, leg: 0, fplSel: 0 };
     this.gpsR = { valid: false }; this.cdi1 = {};
     this.adf = { freq: 344, standby: 362, on: true, vol: 0.7, mode: 'ADF', bfo: false, timer: 'FLT', flt: 0, et: 0 };
   }
@@ -138,12 +138,26 @@ export class Avionics {
     const fs = dist < 30 && w.type === 'APT' ? 1 : 5; // TERM (1 NM) / ENR (5 NM) CDI scaling
     const ete = g.gs > 20 ? dist / g.gs * 3600 : null;
     g.nav = { ident: w.ident, dist, brg, dtk, xtk, toFrom, fs, ete, scale: fs === 1 ? 'TERM' : 'ENR' };
-    if (ete != null && ete < 36 && toFrom > 0 && !g.arrived) { g.arrived = true; this.gpsMsg('ARRIVAL AT WAYPOINT ' + w.ident); }
+    // flight plan: sequence to the next leg when the waypoint is passed (or within 0.3 NM)
+    if (g.fplActive && g.leg < g.fpl.length - 1 && g.mode === 'LEG' && (dist < 0.3 || (toFrom < 0 && dist < 2))) {
+      g.leg++; g.origin = { x: w.x, z: w.z }; g.wpt = { ...g.fpl[g.leg] }; g.arrived = false; return this.gpsUpdate(f, 0, powered);
+    }
+    const last = !g.fplActive || g.leg >= g.fpl.length - 1;
+    if (last && ete != null && ete < 36 && toFrom > 0 && !g.arrived) { g.arrived = true; this.gpsMsg('ARRIVAL AT ' + w.ident); }
     g.wptAlert = ete != null && ete < 36 && toFrom > 0;
     this.gpsR = { valid: true, kind: 'GPS', dev: clamp(-xtk / fs, -1, 1), toFrom, course: dtk, ident: w.ident, dme: dist, gsValid: false };
   }
+  // activate flight plan from present position to its first waypoint
+  gpsActivate(f) {
+    const g = this.gps; if (!g.fpl.length) return;
+    g.fplActive = true; g.leg = 0; g.wpt = { ...g.fpl[0] }; g.origin = { x: f.pos[0], z: f.pos[2] }; g.arrived = false; g.mode = 'LEG'; g.page = 'NAV'; g.cursor = false;
+    this.gpsMsg('FPL ACTIVATED ' + g.fpl.map((w) => w.ident).join('-'));
+  }
   gpsDirect(w, f) {
     const g = this.gps; if (!w) return;
+    // direct-to a waypoint in the active flight plan continues the plan from there
+    const i = g.fpl.findIndex((x) => x.ident === w.ident);
+    if (i >= 0 && g.fpl.length) { g.fplActive = true; g.leg = i; } else g.fplActive = false;
     g.wpt = { ident: w.ident, name: w.name, x: w.x, z: w.z, type: w.type };
     g.origin = { x: f.pos[0], z: f.pos[2] }; g.arrived = false; g.mode = 'LEG'; g.page = 'NAV'; g.cursor = false;
     this.gpsMsg('DIRECT TO ' + w.ident + ' — SET OBS ' + String(Math.round(g.wpt && (Math.atan2(w.x - f.pos[0], -(w.z - f.pos[2])) * 180 / Math.PI + 360) % 360)).padStart(3, '0'));
