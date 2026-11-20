@@ -304,7 +304,7 @@ function smallRoundFace(g, title, lo, hi, ranges, labels, sub = '') {
 // ---------------------------------------------------------------- panel
 const CB_172_MAIN = [['FLAP', 10], ['INST', 5], ['TURN COORD', 5], ['ALT FLD', 5], ['WARN', 5], ['CABIN LT', 5], ['INST LT', 5], ['FUEL PUMP', 5], ['BCN', 5], ['LAND LT', 15], ['TAXI LT', 10], ['NAV LT', 5], ['STROBE', 5], ['PITOT HT', 10]];
 const CB_172_AVN = [['AVN BUS 1', 15], ['AVN BUS 2', 15], ['AUDIO', 5], ['NAV/COM 1', 5], ['NAV/COM 2', 5], ['ADF', 3], ['XPDR', 2], ['AUTOPILOT', 5], ['GPS', 5], ['AVN FAN', 3]];
-const CB_152 = [['ALT FLD', 5], ['INST', 5], ['TURN COORD', 5], ['FLAP', 15], ['BCN', 5], ['LAND LT', 15], ['TAXI LT', 10], ['NAV LT', 5], ['STROBE', 5], ['PITOT HT', 10], ['CABIN LT', 5], ['AVN BUS 1', 15], ['AUDIO', 5], ['NAV/COM 1', 5], ['ADF', 3], ['XPDR', 2], ['GPS', 5]];
+const CB_152 = [['ALT FLD', 5], ['INST', 5], ['TURN COORD', 5], ['FLAP', 15], ['BCN', 5], ['LAND LT', 15], ['TAXI LT', 10], ['NAV LT', 5], ['STROBE', 5], ['PITOT HT', 10], ['CABIN LT', 5], ['AVN BUS 1', 15], ['AUDIO', 5], ['NAV/COM 1', 5], ['ADF', 3], ['XPDR', 2], ['GPS', 5], ['AUTOPILOT', 5]];
 
 export class Panel {
   constructor(type = 'C172') {
@@ -1105,6 +1105,41 @@ proto.layout = function () {
       dyn: (g, c) => { g.save(); g.translate(dx, dy); dynSrc(g, c); g.restore(); },
       hot: (add, sim) => add(rect(X0, Y0, 100, 44), 'cdiSrc', { click: () => { const G = sim.av.gps; G.src = G.src === 'GPS' ? 'NAV' : 'GPS'; }, tip: () => `NAV/GPS switch — CDI 1 and autopilot NAV follow ${sim.av.gps.src === 'GPS' ? 'the GPS' : 'NAV 1'} (click to swap)` }),
     }); };
+  // ARC Navomatic 200A single-axis wing leveler (C152): LVL holds wings level (turn knob = bank),
+  // HDG follows the DG heading bug, NAV tracks CDI 1 (VOR or GPS, per the NAV/GPS switch)
+  const navomatic = (X, Y) => {
+    const W = 330, H = 104, kx = X + W - 52, ky = Y + 52;
+    const btns = [['AP', 'AP'], ['LVL', 'LVL'], ['HDG', 'HDG'], ['NAV', 'NAV']].map(([n, l], i) => ({ n, l, x: X + 14 + i * 50, y: Y + 66 }));
+    C.push({
+      st: (g) => {
+        g.fillStyle = '#070707'; roundRect(g, X - 4, Y - 4, W + 8, H + 8, 7); g.fill();
+        const gr = g.createLinearGradient(0, Y, 0, Y + H); gr.addColorStop(0, '#2a2b2d'); gr.addColorStop(1, '#151617');
+        g.fillStyle = gr; roundRect(g, X, Y, W, H, 5); g.fill();
+        text(g, 'NAVOMATIC 200A', X + 12, Y + 13, 9, '#d9dadb', 'left', 800); text(g, 'ARC', X + W - 104, Y + 13, 9, '#d9dadb', 'right', 800);
+        g.fillStyle = '#030303'; roundRect(g, X + 10, Y + 24, 196, 30, 3); g.fill();
+        text(g, 'L', kx - 34, ky + 4, 9, '#d9dadb', 'center', 800); text(g, 'R', kx + 34, ky + 4, 9, '#d9dadb', 'center', 800);
+        text(g, 'TURN', kx, ky + 42, 8, '#d9dadb', 'center', 700);
+        g.strokeStyle = '#9a9b9c'; g.lineWidth = 1.2; for (let b = -20; b <= 20; b += 10) { const a = (-90 + b * 3) * DEG; g.beginPath(); g.moveTo(kx + Math.cos(a) * 25, ky + Math.sin(a) * 25); g.lineTo(kx + Math.cos(a) * 30, ky + Math.sin(a) * 30); g.stroke(); }
+      },
+      dyn: (g, { f, av, t }) => {
+        const ap = av.ap, pw = !!f.eff?.ap && f.elec, on = pw && ap.on, src = av.gps.src === 'GPS' ? 'GPS' : 'VOR';
+        const navOK = !!av.cdi1?.valid, flash = Math.floor((t || 0) * 2) % 2;
+        const lamp = (x, w, lab, lit, col = '#5dff7a') => { g.save(); g.fillStyle = lit ? col : '#121212'; if (lit) { g.shadowColor = col; g.shadowBlur = 7; } roundRect(g, x, Y + 28, w, 22, 2); g.fill(); g.restore(); text(g, lab, x + w / 2, Y + 39.5, 9, lit ? '#061006' : '#3d3d3d', 'center', 800); };
+        lamp(X + 14, 40, 'AP', on); lamp(X + 58, 40, 'LVL', on && ap.lat === 'ROL'); lamp(X + 102, 40, 'HDG', on && ap.lat === 'HDG');
+        lamp(X + 146, 56, 'NAV ' + src, on && ap.lat === 'NAV' && (navOK || flash), navOK ? '#5dff7a' : '#ffb000');
+        if (ap.discAlert > 0 && Math.floor((t || 0) * 4) % 2) lamp(X + 14, 40, 'AP', true, '#ffb000');
+        for (const b of btns) pushBtn(g, b.x, b.y, 42, 18, b.l, self.isDown('wl' + b.n), { size: 8, dark: true });
+        knob(g, kx, ky, 20, ['#4b4c4e', '#0a0a0b'], 30); knobPointer(g, kx, ky, 20, clamp(ap.rollSel || 0, -20, 20) * 3);
+      },
+      hot: (add, sim) => {
+        const pw = () => !!sim.fdm.eff?.ap;
+        const tips = { AP: 'engage / disconnect (wings level)', LVL: 'wings level — turn knob sets bank', HDG: 'follow the DG heading bug', NAV: () => `track CDI 1 (${sim.av.gps.src === 'GPS' ? 'GPS course' : 'VOR radial set on OBS'} — NAV/GPS switch)` };
+        for (const b of btns) add(rect(b.x, b.y, 42, 18), 'wl' + b.n, { click: () => { if (!pw()) return; sim.av.apButton(b.n, sim.fdm); }, tip: () => `Navomatic ${b.n} — ${typeof tips[b.n] === 'function' ? tips[b.n]() : tips[b.n]}${pw() ? '' : ' (no power: AVIONICS / AUTOPILOT breaker)'}` });
+        const turn = (d) => { const ap = sim.av.ap; ap.rollSel = clamp((ap.rollSel || 0) + d * 5, -20, 20); if (ap.on && ap.lat !== 'ROL') ap.lat = 'ROL'; };
+        add(circ(kx, ky, 24), 'wlTurn', { click: (b) => turn(b === 2 ? -1 : 1), wheel: (d) => turn(-Math.sign(d)), tip: () => `Navomatic TURN knob — bank ${sim.av.ap.rollSel ? Math.abs(sim.av.ap.rollSel) + '° ' + (sim.av.ap.rollSel > 0 ? 'right' : 'left') : 'level'} (click = right 5°, right-click = left 5°)` });
+      },
+    });
+  };
   const breakers = (list, x0, y0, dx, perRow = 99, dy = 62) => list.forEach(([name, amps], i) => {
     const x = x0 + (i % perRow) * dx, y = y0 + Math.floor(i / perRow) * dy;
     C.push({
@@ -1209,8 +1244,9 @@ proto.layout = function () {
     split(130, 790, ['alternator', 'master'], ['ALT', 'BAT'], 'MASTER', 'red', (s, k) => { if (k === 'alternator' && s.alternator) s.master = true; if (k === 'master' && !s.master) s.alternator = false; });
     const sw = [['avionics', 'AVN', 'POWER'], ['beacon', 'BCN'], ['landing', 'LAND'], ['taxi', 'TAXI'], ['nav', 'NAV'], ['strobe', 'STROBE'], ['pitotHeat', 'PITOT', 'HEAT']];
     sw.forEach(([k, l, sub], i) => rocker(312 + i * 50, 790, k, l, { sub, color: 'white' }));
-    breakers(CB_152, 244, 948, 56);
+    breakers(CB_152, 220, 948, 54);
     cdiSrcSwitch(760, 22);
+    navomatic(1600, 178);
     C.push({ st: (g) => engrave(g, 'CIRCUIT BREAKERS — PUSH TO RESET', 692, 1008, 9, '#eee') });
     this.dimmer(C, 1440, 860, 'panelDim', 'radioDim', 'PANEL LT', 'RADIO LT', circ);
     this.flapPanel(C, 1330, 690, [690, 735, 780, 825]);

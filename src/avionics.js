@@ -34,7 +34,7 @@ export class Avionics {
     this.audio = { on: true, vol: 0.8, mic: 1, mkrSens: 'HI', rx: { COM1: true, COM2: false, COM3: false, NAV1: false, NAV2: false, DME: false, ADF: false, MKR: true, SPKR: true } };
     this.aiBias = 0; this.adfCard = 0;
     this.hdgBug = 270;
-    this.ap = { on: false, lat: 'ROL', vert: 'VS', vsSel: 0, altSel: 3000, gsArmed: false, locArmed: false, iBank: 0, iPitch: 0, trimTimer: 0 };
+    this.ap = { on: false, lat: 'ROL', vert: 'VS', rollSel: 0, vsSel: 0, altSel: 3000, gsArmed: false, locArmed: false, iBank: 0, iPitch: 0, trimTimer: 0 };
     this.r1 = {}; this.r2 = {};
     // Bendix/King KLN 94 GPS (172S only). src = CDI 1 source selected by the NAV/GPS switch.
     this.gps = { on: true, bright: 0.8, test: 3, page: 'NAV', prev: 'NAV', mode: 'LEG', range: 10, declutter: false, cursor: false, sel: 0, dtoSel: 0,
@@ -164,8 +164,9 @@ export class Avionics {
     if (alert) this.ap.discAlert = 2.5;
   }
 
-  engage() {
-    this.ap.on = true; this.ap.lat = 'ROL'; this.ap.vert = 'VS';
+  engage(f) {
+    const rollOnly = !!f?.aircraft?.apRollOnly;
+    this.ap.on = true; this.ap.lat = 'ROL'; this.ap.vert = rollOnly ? '' : 'VS'; if (rollOnly) this.ap.rollSel = 0;
     this.ap.vsSel = Math.round(this.lastVs / 100) * 100 || 0;
     this.ap.iBank = 0; this.ap.iPitch = 0;
   }
@@ -177,6 +178,8 @@ export class Avionics {
     this.lastVs = f.ind.vsi;
     if (ap.discAlert) ap.discAlert = Math.max(0, ap.discAlert - dt);
     if (!ap.on) return null;
+    // single-axis wing leveler (C152 Navomatic 200A): roll only, the pilot keeps pitch and power
+    const rollOnly = !!f.aircraft?.apRollOnly;
     // --- lateral ---
     const hdgGyro = (att.hdg - f.gyro.hiDrift + 360) % 360;
     let bankCmd = 0;
@@ -194,9 +197,10 @@ export class Avionics {
         bankCmd = clamp(angDiff(want, hdgGyro) * 1.2, -20, 20);
         if (ap.lat === 'APR' && ap.gsArmed && r.gsValid && Math.abs(r.gsDev) < 0.15 && ap.vert !== 'GS') { ap.vert = 'GS'; ap.gsArmed = false; }
       } else bankCmd = clamp(angDiff(this.hdgBug, hdgGyro) * 1.4, -20, 20);
-    } else bankCmd = 0;
+    } else bankCmd = rollOnly ? clamp(ap.rollSel || 0, -20, 20) : 0;
     const bankErr = bankCmd - att.roll;
     const ail = clamp(bankErr * 0.035 - f.omega[0] * 0.6, -0.6, 0.6);
+    if (rollOnly) { if (Math.abs(att.roll) > 60) this.disconnect(true); return { ail, elev: null }; }
     // --- vertical ---
     let vsCmd = ap.vsSel;
     if (ap.vert === 'ALT') vsCmd = clamp((ap.altHold - f.ind.alt) * 4, -700, 700);
@@ -217,8 +221,11 @@ export class Avionics {
 
   apButton(name, f) {
     const ap = this.ap;
-    if (name === 'AP') { if (ap.on) this.disconnect(true); else this.engage(); return; }
-    if (!ap.on) { if (name !== 'AP') { this.engage(); } }
+    const rollOnly = !!f?.aircraft?.apRollOnly;
+    if (rollOnly && ['ALT', 'UP', 'DN', 'APR', 'REV', 'ARM'].includes(name)) return;
+    if (name === 'AP') { if (ap.on) this.disconnect(true); else this.engage(f); return; }
+    if (!ap.on) { if (name !== 'AP') { this.engage(f); } }
+    if (name === 'LVL') { ap.lat = 'ROL'; ap.rollSel = 0; }
     if (name === 'HDG') ap.lat = ap.lat === 'HDG' ? 'ROL' : 'HDG';
     if (name === 'NAV') ap.lat = ap.lat === 'NAV' ? 'ROL' : 'NAV';
     if (name === 'APR') { ap.lat = ap.lat === 'APR' ? 'ROL' : 'APR'; ap.gsArmed = ap.lat === 'APR'; }

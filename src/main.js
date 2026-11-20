@@ -1,21 +1,21 @@
 // Skyhawk — main loop, cameras, input, UI.
 import * as THREE from 'three';
-import { FDM, KT, FT, C172, C152 } from './fdm.js?v=20261122c';
+import { FDM, KT, FT, C172, C152 } from './fdm.js?v=20261122d';
 import { qrot } from './math.js';
 import { groundQuery, heightAt, AIRPORTS, NAVAIDS, fromLocal, toLocal, WATER_LEVEL, findRunway, runwayEnd, inWorld, waterFrac, ll2w } from './geo.js';
 import { createTerrainMaterial, Terrain } from './terrain.js';
-import { buildAircraft, animateAircraft } from './aircraft.js?v=20261122c';
-import { Panel } from './panel.js?v=20261122c';
-import { Avionics, ILS } from './avionics.js?v=20261122c';
+import { buildAircraft, animateAircraft } from './aircraft.js?v=20261122d';
+import { Panel } from './panel.js?v=20261122d';
+import { Avionics, ILS } from './avionics.js?v=20261122d';
 import { Environment } from './env.js';
 import { buildAirports, RockField, Forest, GrassField } from './world.js';
-import { Scenery } from './scenery.js?v=20261122c';
-import { Traffic } from './traffic.js?v=20261122c';
+import { Scenery } from './scenery.js?v=20261122d';
+import { Traffic } from './traffic.js?v=20261122d';
 import { buildLife } from './life.js';
-import { MovingMap } from './map.js?v=20261122c';
+import { MovingMap } from './map.js?v=20261122d';
 import { Sound } from './audio.js';
 import { setAniso } from './textures.js';
-import { ATC } from './atc.js?v=20261122c';
+import { ATC } from './atc.js?v=20261122d';
 import { initCesium, syncCesiumCamera, getCesiumElevationWorld, warmCesiumTerrain } from './cesium.js?v=20261120';
 
 const $ = (id) => document.getElementById(id);
@@ -525,7 +525,7 @@ window.addEventListener('keydown', (e) => {
     case 'KeyO': if (sh) { S.nav = !S.nav; toast('Nav lights ' + (S.nav ? 'ON' : 'OFF')); } else { S.strobe = !S.strobe; toast('Strobes ' + (S.strobe ? 'ON' : 'OFF')); } break;
     case 'KeyK': F.kollsman = Math.round(sim.weather.qnhInHg * 100) / 100; toast('Altimeter ' + F.kollsman.toFixed(2)); break;
     case 'KeyD': if (!walkView()) { F.gyro.hiDrift = ((F.attitude.hdg - F.gyro.compass + 540) % 360) - 180; toast('Heading indicator set to compass'); } break;
-    case 'KeyA': if (!walkView() && !sh) { if (!F.eff?.ap) { toast(F.aircraft.carb ? 'The Cessna 152 has no autopilot' : 'Autopilot has no power (AVIONICS BUS 2 / AUTOPILOT breaker)'); break; } av.apButton('AP', F); toast(av.ap.on ? 'Autopilot ENGAGED (ROL/VS)' : 'Autopilot DISCONNECTED'); } else if (sh && !walkView()) { /* reserved */ } break;
+    case 'KeyA': if (!walkView() && !sh) { const wl = !!F.aircraft.apRollOnly; if (!F.eff?.ap) { toast(wl ? 'Wing leveler has no power (AVIONICS switch / AUTOPILOT breaker)' : 'Autopilot has no power (AVIONICS BUS 2 / AUTOPILOT breaker)'); break; } av.apButton('AP', F); toast(av.ap.on ? (wl ? 'Wing leveler ENGAGED (LVL) — you still fly pitch' : 'Autopilot ENGAGED (ROL/VS)') : (wl ? 'Wing leveler' : 'Autopilot') + ' DISCONNECTED'); } else if (sh && !walkView()) { /* reserved */ } break;
     case 'KeyH': if (sh) { av.apButton('HDG', F); toast('AP ' + av.ap.lat); } break;
     case 'KeyN': if (sh) { av.apButton('NAV', F); toast('AP ' + av.ap.lat); } else { $('mini').classList.toggle('hidden'); } break;
     case 'KeyR':
@@ -689,8 +689,9 @@ function updateControls(dt) {
   const apCmd = sim.apCmd;
   if (apCmd) {
     // pilot override: strong input disconnects
-    if (Math.abs(elev) > 0.6 || Math.abs(ail) > 0.6) { sim.av.disconnect(true); toast('Autopilot DISCONNECTED (override)'); }
-    else { elev = apCmd.elev + elev * 0.3; ail = apCmd.ail + ail * 0.3; }
+    const rollOnly = apCmd.elev == null; // wing leveler: pilot keeps full pitch control
+    if ((!rollOnly && Math.abs(elev) > 0.6) || Math.abs(ail) > 0.6) { sim.av.disconnect(true); toast((rollOnly ? 'Wing leveler' : 'Autopilot') + ' DISCONNECTED (override)'); }
+    else { if (!rollOnly) elev = apCmd.elev + elev * 0.3; ail = apCmd.ail + ail * 0.3; }
   }
   c.elev = clamp(elev, -1, 1); c.ail = clamp(ail, -1, 1); c.rud = clamp(rud, -1, 1);
   // throttle / mixture / trim
@@ -702,7 +703,7 @@ function updateControls(dt) {
   if (K.Home) c.trim = clamp(c.trim - dt * 0.25, -1, 1);
   if (K.End) c.trim = clamp(c.trim + dt * 0.25, -1, 1);
   // AP electric trim follows elevator servo load
-  if (apCmd && sim.av.ap.on) c.trim = clamp(c.trim + clamp(apCmd.elev, -0.3, 0.3) * dt * 0.12, -1, 1);
+  if (apCmd && apCmd.elev != null && sim.av.ap.on) c.trim = clamp(c.trim + clamp(apCmd.elev, -0.3, 0.3) * dt * 0.12, -1, 1);
   // brakes
   c.toeBrake = 0; c.brakeL = 0; c.brakeR = 0;
   if (K.KeyB && !sh) { c.brakeL = 1; c.brakeR = 1; }
@@ -854,7 +855,7 @@ function updateHUD() {
   set('dAoa', F.tas > 15 ? ((F.alpha || 0) / D2R).toFixed(1) : '—'); set('dG', (F.nz || 1).toFixed(2)); set('dRpm', Math.round(F.eng.rpm)); set('dThr', Math.round(F.ctrl.throttle * 100));
   set('dMix', Math.round(F.ctrl.mixture * 100)); set('dFlap', Math.round(F.flapPos)); set('dTrim', (F.ctrl.trim > 0 ? '+' : '') + Math.round(F.ctrl.trim * 100));
   const w = sim.weather; set('dWind', `${String(w.windDir).padStart(3, '0')}/${w.windKt}`);
-  $('apChip').classList.toggle('hidden', !sim.av.ap.on); if (sim.av.ap.on) $('apChip').textContent = `AP ${sim.av.ap.lat} ${sim.av.ap.vert}${sim.av.ap.vert === 'VS' ? ' ' + sim.av.ap.vsSel : ''}`;
+  $('apChip').classList.toggle('hidden', !sim.av.ap.on); if (sim.av.ap.on) $('apChip').textContent = sim.fdm.aircraft.apRollOnly ? `WING LVL ${sim.av.ap.lat === 'ROL' ? (sim.av.ap.rollSel ? 'TURN ' + (sim.av.ap.rollSel > 0 ? 'R' : 'L') + Math.abs(sim.av.ap.rollSel) : 'LVL') : sim.av.ap.lat}${sim.av.ap.lat === 'NAV' ? ' ' + sim.av.gps.src : ''}` : `AP ${sim.av.ap.lat} ${sim.av.ap.vert}${sim.av.ap.vert === 'VS' ? ' ' + sim.av.ap.vsSel : ''}`;
   $('brakeChip').classList.toggle('hidden', !F.ctrl.parkBrake);
   $('simRate').textContent = sim.simRate + '×';
   $('imcChip').classList.toggle('hidden', !env.inCloud);

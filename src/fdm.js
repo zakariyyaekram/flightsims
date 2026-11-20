@@ -64,6 +64,7 @@ export const C172 = {
 
 export const C152 = {
   rollRig: 0.105, // aileron/wing rigging, set so cruise is hands-off neutral
+  apRollOnly: true, // optional ARC Navomatic 200A single-axis wing leveler (roll only)
   emptyMass: 504, // kg (1,111 lb)
   wingArea: 14.9, span: 10.16, AR: 6.93,
   inertia: [700, 1200, 1000],
@@ -758,7 +759,7 @@ export class FDM {
     // avionics: 172S bus 1 = NAV/COM 1, audio; bus 2 = NAV/COM 2, ADF, XPDR, autopilot (simplified)
     const b1 = this.elec && bus1, b2 = this.elec && bus2;
     E.audio = (b1 || b2) && cb('AUDIO'); E.com1 = b1 && cb('NAV/COM 1'); E.com2 = two && b2 && cb('NAV/COM 2');
-    E.adf = (two ? b2 : b1) && cb('ADF'); E.xpdr = (two ? b2 : b1) && cb('XPDR'); E.ap = two && b2 && cb('AUTOPILOT'); E.gps = b1 && cb('GPS');
+    E.adf = (two ? b2 : b1) && cb('ADF'); E.xpdr = (two ? b2 : b1) && cb('XPDR'); E.ap = (two ? b2 : b1) && cb('AUTOPILOT'); E.gps = b1 && cb('GPS');
     this.avionicsOn = b1 || b2;
     // gyros: AI & HI vacuum-driven, TC electric
     const vacOK = e.vac > 3.8;
