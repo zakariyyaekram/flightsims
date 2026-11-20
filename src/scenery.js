@@ -4,13 +4,12 @@
 // real high-rises (OSM heights) of San Francisco, Oakland and San Jose.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { heightAt, townAt, waterFrac, pavedAt, roadsInBox, roadNear, ROADS, TALL, STREET_TILE, streetTile, ll2w, w2ll, pointInPoly, inWorld } from './geo.js';
+import { heightAt, townAt, waterFrac, pavedAt, roadsInBox, roadNear, ROADS, TALL, STREET_TILE, streetTile, bldTile, forestAt, ll2w, w2ll, pointInPoly, inWorld } from './geo.js';
 import { windowShader, gableGeometry, lightMaterial, makePoints } from './world.js';
 import { extrudeFootprint, buildingMaterials, wallGeo, roofGeo } from './airport3d.js';
 import { mulberry } from './noise.js';
 
 const ROAD_TILE = 4000, CELL = 1000;
-export const REJ = { out: 0, occ: 0, wp: 0, tall: 0, slope: 0, ok: 0, town: 0 };
 const TEXV = 24; // metres of road per texture repeat
 
 // ---------------------------------------------------------------- road textures (canvas, US markings)
@@ -81,7 +80,7 @@ function ribbon(pts, half, out, lift, step = 20) {
       const y = p[2] != null ? p[2] : Math.max(heightAt(x, z), 0.6) + lift;
       out.P.push(x, y, z); out.U.push(s < 0 ? 0 : 1, v / TEXV);
     }
-    if (i) { const k = base + i * 2; out.I.push(k - 2, k, k - 1, k - 1, k, k + 1); }
+    if (i) { const k = base + i * 2; out.I.push(k - 2, k - 1, k, k - 1, k + 1, k); }
   }
 }
 function ribbonGeo(o) {
@@ -111,7 +110,7 @@ export class Scenery {
   constructor(scene, opts = {}) {
     this.scene = scene; this.light = !!opts.light; this.group = new THREE.Group(); this.group.name = 'scenery'; scene.add(this.group);
     this.roadR = this.light ? 6500 : 12000; this.cellR = this.light ? 1900 : 3200;
-    this.roadTiles = new Map(); this.cells = new Map(); this.streetTiles = new Map(); this.night = 0;
+    this.roadTiles = new Map(); this.cells = new Map(); this.streetTiles = new Map(); this.bldTiles = new Map(); this.night = 0;
     this.quality = opts.quality ?? 1; this.busy = false;
   }
   async init() {
@@ -122,7 +121,7 @@ export class Scenery {
     this.roofMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, map: this.M?.roofTile?.map || null });
     this.flatRoofMat = plain(0x8e8b86, 0.95);
     this.trunkMat = plain(0x4a3a2c); this.crownMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95 });
-    this.concrete = plain(0xb3b0aa, 0.95); this.orange = new THREE.MeshStandardMaterial({ color: 0xc0362c, roughness: 0.6, metalness: 0.2 });
+    this.concrete = plain(0xb3b0aa, 0.95); this.concrete.side = THREE.DoubleSide; this.orange = new THREE.MeshStandardMaterial({ color: 0xc0362c, roughness: 0.6, metalness: 0.2, side: THREE.DoubleSide });
     this.boxGeo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0); this.gableGeo = gableGeometry(); this.tree = treeGeos();
     this.lightMat = lightMaterial();
     // TALL footprints index (for keeping procedural houses out of real buildings)
@@ -231,8 +230,10 @@ export class Scenery {
       const tx = Math.floor(cx * CELL / STREET_TILE), tz = Math.floor(cz * CELL / STREET_TILE), tk = tx + '_' + tz;
       const st = this.streetTiles.get(tk);
       if (!st) { const e = { ways: null }; this.streetTiles.set(tk, e); streetTile(tx, tz).then((w) => { e.ways = w || []; }, () => { e.ways = []; }); continue; }
-      if (!st.ways) continue;
-      this.cells.set(k, this.buildCell(cx, cz, st.ways)); built++;
+      let bt = this.bldTiles.get(k);
+      if (!bt) { bt = { d: null }; this.bldTiles.set(k, bt); bldTile(cx, cz).then((d) => { bt.d = d; }); continue; }
+      if (!st.ways || !bt.d) continue;
+      this.cells.set(k, this.buildCell(cx, cz, st.ways, bt.d)); this.bldTiles.delete(k); built++;
     }
     for (const [k, c] of this.cells) if ((c.cx - cam.x) ** 2 + (c.cz - cam.z) ** 2 > (cr + CELL * 1.8) ** 2) { this.free(c.obj); this.cells.delete(k); }
   }
@@ -306,7 +307,7 @@ export class Scenery {
   }
 
   // ---------------- 1 km street cell: streets, houses, shops, trees, street lights ----------------
-  buildCell(cx, cz, tileWays) {
+  buildCell(cx, cz, tileWays, bld = { rects: [], polys: [], trees: [] }) {
     const x0 = cx * CELL, z0 = cz * CELL, x1 = x0 + CELL, z1 = z0 + CELL, M = 40;
     const obj = new THREE.Group(); const rnd = mulberry((cx * 73856093) ^ (cz * 19349663));
     // ways of this cell (segments by midpoint) and an occupancy raster (3 m) of all pavement nearby
@@ -344,45 +345,58 @@ export class Scenery {
       ribbon(run, r.w / 2 + sw, G.o, 0.28, 25);
     }
     for (const G of groups.values()) { const g = ribbonGeo(G.o); if (!g) continue; const m = new THREE.Mesh(g, roadMaterial('street', G.lanes, false, G.w, G.sw)); m.receiveShadow = true; obj.add(m); }
-    // buildings along streets
-    const sfLike = (x, z) => { const ll = w2ll(x, z); return (ll.lat > 37.705 && ll.lon < -122.385 && ll.lat < 37.81) || (ll.lat > 37.79 && ll.lat < 37.83 && ll.lon > -122.30 && ll.lon < -122.24); };
-    const lotsFor = (r, idx) => {
+    // street lights along the real streets (towns only)
+    for (const { r, idx } of cellWays) {
+      let acc = 0;
       for (let k = 0; k < idx.length - 1; k++) {
         const i = idx[k]; const ax = r.pts[i * 2], az = r.pts[i * 2 + 1], bx = r.pts[i * 2 + 2], bz = r.pts[i * 2 + 3];
-        const L = Math.hypot(bx - ax, bz - az); if (L < 8) continue; const dx = (bx - ax) / L, dz = (bz - az) / L, nx = -dz, nz = dx;
-        const tw = TOWNY((ax + bx) / 2, (az + bz) / 2); if (tw < 0.18) { REJ.town++; continue; }
-        const dense = tw > 0.82, sf = dense && sfLike(ax, az), shopRow = r.kind === 'tertiary' && tw > 0.45;
-        const spacing = sf ? 7.8 : shopRow ? 26 : dense ? 15 : 19 + rnd() * 6;
-        const sw = tw > 0.25 ? 2.2 : 0;
-        for (let s = spacing * 0.6; s < L - spacing * 0.4; s += spacing * (sf ? 1 : 0.9 + rnd() * 0.25)) {
-          const px0 = ax + dx * s, pz0 = az + dz * s;
-          // street tree + light on the kerb
-          if (sw && rnd() < (sf ? 0.25 : 0.5)) { const sd = rnd() < 0.5 ? -1 : 1; const tx = px0 + nx * (r.w / 2 + sw * 0.55) * sd, tz = pz0 + nz * (r.w / 2 + sw * 0.55) * sd; if (waterFrac(tx, tz) < 0.2) trees.push([tx, tz, 5 + rnd() * 5, rnd()]); }
-          if (sw && ((s / spacing) | 0) % 3 === 0) { const tx = px0 + nx * (r.w / 2 + 0.6), tz = pz0 + nz * (r.w / 2 + 0.6); lights.push({ p: [tx, heightAt(tx, tz) + 8.5, tz], c: [1, 0.78, 0.45], s: 1.6 }); }
-          for (const sd of [-1, 1]) {
-            if (rnd() < (sf ? 0.04 : 0.12)) continue;
-            const fw = sf ? 7.4 : shopRow ? 18 + rnd() * 12 : 10 + rnd() * 5, dd = sf ? 18 + rnd() * 6 : shopRow ? 16 + rnd() * 14 : 10 + rnd() * 6;
-            const set = r.w / 2 + sw + (sf ? 0.3 : shopRow ? 1.5 : 5 + rnd() * 3) + dd / 2;
-            const x = px0 + nx * set * sd, z = pz0 + nz * set * sd;
-            if (x < x0 || x >= x1 || z < z0 || z >= z1) { REJ.out++; continue; }
-            const c = dx, sn = dz; // local u along street, v across
-            if (!rectFree(x, z, fw / 2 - 1.6, dd / 2 - 1.6, c, sn)) { REJ.occ++; continue; }
-            if (waterFrac(x, z) > 0.1 || pavedAt(x, z)) { REJ.wp++; continue; }
-            if (this.inTall(x, z, Math.max(fw, dd) / 2)) { REJ.tall++; continue; }
-            fill(x, z, fw / 2 + (sf ? 0 : 1.5), dd / 2 + 1.5, c, sn);
-            let ymin = 1e9, ymax = -1e9; for (const [u, v] of [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, 0]]) { const h = heightAt(x + c * u * fw / 2 - sn * v * dd / 2, z + sn * u * fw / 2 + c * v * dd / 2); ymin = Math.min(ymin, h); ymax = Math.max(ymax, h); }
-            if (ymax - ymin > 7) { REJ.slope++; continue; }
-            REJ.ok++;
-            const yaw = Math.atan2(-dz, dx);
-            if (shopRow || (dense && !sf && rnd() < 0.35)) { const fl = shopRow ? 1 + Math.floor(rnd() * (tw > 0.8 ? 5 : 2)) : 2 + Math.floor(rnd() * 3); shops.push([x, ymin - 0.6, z, fw, dd, fl * 3.6 + 1 + (ymax - ymin), yaw, rnd()]); }
-            else { const fl = sf ? 3 : rnd() < (dense ? 0.55 : 0.3) ? 2 : 1; houses.push([x, ymin - 0.5, z, fw, dd, fl * 3 + 0.4 + (ymax - ymin), yaw, rnd(), sf]); }
-            // yard trees behind detached houses
-            if (!sf && !shopRow && rnd() < 0.55) { const bx2 = x + nx * sd * (dd / 2 + 4 + rnd() * 4) + dx * (rnd() - 0.5) * fw, bz2 = z + nz * sd * (dd / 2 + 4 + rnd() * 4) + dz * (rnd() - 0.5) * fw; if (free(bx2, bz2)) trees.push([bx2, bz2, 7 + rnd() * 8, rnd()]); }
-          }
-        }
+        const L = Math.hypot(bx - ax, bz - az); if (L < 1) continue; const nx = -(bz - az) / L, nz = (bx - ax) / L;
+        for (let t = (40 - acc) % 40; t < L; t += 40) { const x = ax + (bx - ax) * t / L + nx * (r.w / 2 + 0.6), z = az + (bz - az) * t / L + nz * (r.w / 2 + 0.6); if (TOWNY(x, z) > 0.25) lights.push({ p: [x, heightAt(x, z) + 8.5, z], c: [1, 0.78, 0.45], s: 1.6 }); }
+        acc = (acc + L) % 40;
       }
-    };
-    for (const { r, idx } of cellWays) lotsFor(r, idx);
+    }
+    // ---- real buildings from OpenStreetMap footprints (data/bld, baked by tools/bake_buildings.py)
+    const inCell = (x, z) => x >= x0 && x < x1 && z >= z0 && z < z1;
+    const ground = (pts) => { let lo = 1e9, hi = -1e9; for (const [x, z] of pts) { const h = heightAt(x, z); lo = Math.min(lo, h); hi = Math.max(hi, h); } return [lo, hi]; };
+    for (const b of bld.rects) {
+      if (!inCell(b.x, b.z) || this.inTall(b.x, b.z, 0)) continue;
+      const c = Math.cos(b.yaw), sn = Math.sin(b.yaw), hw = b.w / 2, hd = b.d / 2;
+      const [lo, hi] = ground([[b.x + c * hw - sn * hd, b.z + sn * hw + c * hd], [b.x - c * hw - sn * hd, b.z - sn * hw + c * hd], [b.x + c * hw + sn * hd, b.z + sn * hw - c * hd], [b.x - c * hw + sn * hd, b.z - sn * hw - c * hd], [b.x, b.z]]);
+      fill(b.x, b.z, hw + 1, hd + 1, c, sn);
+      const k = ((b.x * 7.31 + b.z * 3.17) % 1 + 1) % 1, H = b.h + (hi - lo) + 0.5, yaw = -b.yaw;
+      const area = b.w * b.d, t = b.type === 7 ? (area > 400 ? 3 : 0) : b.type;
+      if (t === 0 || t === 6) houses.push([b.x, lo - 0.5, b.z, b.w, b.d, H, yaw, k, false, b.roof > 0 && t === 0]);
+      else if (t === 1 || t === 2) houses.push([b.x, lo - 0.5, b.z, b.w, b.d, H, yaw, k, true, false]);
+      else shops.push([b.x, lo - 0.5, b.z, b.w, b.d, H, yaw, k, t]);
+    }
+    const PW = { house: { P: [], N: [], F: [] }, shop: { P: [], N: [], F: [] }, roof: { P: [], N: [], U: [] } };
+    let polyN = 0;
+    for (const b of bld.polys) {
+      let mx = 0, mz = 0; for (const q of b.p) { mx += q[0]; mz += q[1]; } mx /= b.p.length; mz /= b.p.length;
+      if (!inCell(mx, mz) || this.inTall(mx, mz, 0)) continue;
+      const [lo, hi] = ground(b.p);
+      const res = b.type <= 2 || b.type === 6;
+      extrudeFootprint(b.p, lo - 0.5, lo + b.h + Math.min(hi - lo, 6), res ? PW.house : PW.shop, PW.roof);
+      let bx0 = 1e9, bz0 = 1e9, bx1 = -1e9, bz1 = -1e9; for (const q of b.p) { bx0 = Math.min(bx0, q[0]); bx1 = Math.max(bx1, q[0]); bz0 = Math.min(bz0, q[1]); bz1 = Math.max(bz1, q[1]); }
+      for (let z = bz0; z <= bz1; z += R) for (let x = bx0; x <= bx1; x += R) if (pointInPoly(x, z, b.p)) { const ix = Math.floor((x - x0 + M) / R), iz = Math.floor((z - z0 + M) / R); if (ix >= 0 && iz >= 0 && ix < NX && iz < NX) occ[iz * NX + ix] = 1; }
+      polyN++;
+    }
+    if (this.M) {
+      const wg = wallGeo(PW.house), sg = wallGeo(PW.shop), rg = roofGeo(PW.roof);
+      if (wg) { const m = new THREE.Mesh(wg, this.M.house); m.castShadow = m.receiveShadow = true; obj.add(m); }
+      if (sg) { const m = new THREE.Mesh(sg, this.M.office); m.castShadow = m.receiveShadow = true; obj.add(m); }
+      if (rg) { const m = new THREE.Mesh(rg, this.flatRoofMat); m.receiveShadow = true; obj.add(m); }
+    }
+    // ---- trees: every OSM-mapped tree, plus canopy trees where ESA WorldCover maps tree cover inside town
+    for (const t of bld.trees) if (inCell(t.x, t.z) && free(t.x, t.z)) trees.push([t.x, t.z, Math.max(5, t.h), ((t.x * 3.7 + t.z) % 1 + 1) % 1]);
+    const STEP = 11;
+    for (let z = z0 + STEP / 2; z < z1 && trees.length < 2600; z += STEP) for (let x = x0 + STEP / 2; x < x1; x += STEP) {
+      const jx = x + (rnd() - 0.5) * STEP * 0.8, jz = z + (rnd() - 0.5) * STEP * 0.8, rr = rnd();
+      if (TOWNY(jx, jz) < 0.2) continue;
+      const f = forestAt(jx, jz, 0, 0); if (rr > f * 0.9) continue;
+      if (!free(jx, jz) || pavedAt(jx, jz)) continue;
+      trees.push([jx, jz, 6 + rnd() * 9, rnd()]);
+    }
     // ---- instanced meshes
     const M4 = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), s = new THREE.Vector3(), Y = new THREE.Vector3(0, 1, 0), col = new THREE.Color();
     const mkInst = (geo, mat, list, fn, cast = true) => {
@@ -391,18 +405,18 @@ export class Scenery {
       im.castShadow = cast; im.receiveShadow = true; im.computeBoundingSphere(); obj.add(im); return im;
     };
     mkInst(this.boxGeo, this.houseMat, houses, (h, i, im) => { q.setFromAxisAngle(Y, h[6]); p.set(h[0], h[1], h[2]); s.set(h[3], h[5], h[4]); M4.compose(p, q, s); im.setColorAt(i, col.set((h[8] ? SF_COL : HOUSE_COL)[Math.floor(h[7] * 12) % 12])); });
-    const gable = houses.filter((h) => !h[8]);
-    mkInst(this.gableGeo, this.roofMat, gable, (h, i, im) => { q.setFromAxisAngle(Y, h[6] + (h[3] > h[4] ? Math.PI / 2 : 0)); p.set(h[0], h[1] + h[5], h[2]); const a = Math.min(h[3], h[4]), b = Math.max(h[3], h[4]); s.set(a * 0.95, Math.min(3.2, a * 0.33), b * 0.95); M4.compose(p, q, s); im.setColorAt(i, col.set(ROOF_COL[Math.floor(h[7] * 97) % ROOF_COL.length])); });
-    const flat = [...houses.filter((h) => h[8]), ...shops];
+    const gable = houses.filter((h) => h[9]);
+    mkInst(this.gableGeo, this.roofMat, gable, (h, i, im) => { q.setFromAxisAngle(Y, h[6] + (h[3] > h[4] ? Math.PI / 2 : 0)); p.set(h[0], h[1] + h[5], h[2]); const a = Math.min(h[3], h[4]), b = Math.max(h[3], h[4]); s.set(a * 1.02, Math.min(3.2, a * 0.3), b * 1.02); M4.compose(p, q, s); im.setColorAt(i, col.set(ROOF_COL[Math.floor(h[7] * 97) % ROOF_COL.length])); });
+    const flat = [...houses.filter((h) => !h[9]), ...shops];
     mkInst(this.boxGeo, this.flatRoofMat, flat, (h, i) => { q.setFromAxisAngle(Y, h[6]); p.set(h[0], h[1] + h[5], h[2]); s.set(h[3] + 0.3, 0.5, h[4] + 0.3); M4.compose(p, q, s); }, false);
-    mkInst(this.boxGeo, this.shopMat, shops, (h, i, im) => { q.setFromAxisAngle(Y, h[6]); p.set(h[0], h[1], h[2]); s.set(h[3], h[5], h[4]); M4.compose(p, q, s); im.setColorAt(i, col.set(SHOP_COL[Math.floor(h[7] * 8) % 8])); });
+    mkInst(this.boxGeo, this.shopMat, shops, (h, i, im) => { q.setFromAxisAngle(Y, h[6]); p.set(h[0], h[1], h[2]); s.set(h[3], h[5], h[4]); M4.compose(p, q, s); im.setColorAt(i, col.set(h[8] === 4 ? '#c4c6c4' : SHOP_COL[Math.floor(h[7] * 8) % 8])); });
     // trees (trunk + crown)
     const tr = trees.map(([x, z, h, k]) => [x, heightAt(x, z) - 0.2, z, h, k]);
     mkInst(this.tree.trunk, this.trunkMat, tr, (t) => { p.set(t[0], t[1], t[2]); q.identity(); s.set(1 + t[3] * 0.04, t[3] * 0.45, 1 + t[3] * 0.04); M4.compose(p, q, s); }, false);
     mkInst(this.tree.crown, this.crownMat, tr, (t, i, im) => { p.set(t[0], t[1] + t[3] * 0.3, t[2]); q.setFromAxisAngle(Y, t[4] * 6.28); const w = t[3] * (0.55 + t[4] * 0.25); s.set(w, t[3] * 0.75, w); M4.compose(p, q, s); im.setColorAt(i, col.setRGB(0.22 + t[4] * 0.12, 0.34 + t[4] * 0.12, 0.16 + t[4] * 0.05)); });
     if (lights.length) obj.add(makePoints(lights, this.lightMat));
     this.group.add(obj);
-    return { obj, cx: x0 + CELL / 2, cz: z0 + CELL / 2, ways: cellWays.map((c) => c.r).filter((v, i, a) => a.indexOf(v) === i), houses: houses.length, shops: shops.length, trees: trees.length };
+    return { obj, cx: x0 + CELL / 2, cz: z0 + CELL / 2, ways: cellWays.map((c) => c.r).filter((v, i, a) => a.indexOf(v) === i), houses: houses.length, shops: shops.length + polyN, trees: trees.length };
   }
   stats() { let h = 0, s = 0, t = 0; for (const c of this.cells.values()) { h += c.houses; s += c.shops; t += c.trees; } return { roadTiles: this.roadTiles.size, cells: this.cells.size, houses: h, shops: s, trees: t }; }
 }

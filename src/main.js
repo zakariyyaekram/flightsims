@@ -1,21 +1,21 @@
 // Skyhawk — main loop, cameras, input, UI.
 import * as THREE from 'three';
-import { FDM, KT, FT, C172, C152 } from './fdm.js?v=20261122b';
+import { FDM, KT, FT, C172, C152 } from './fdm.js?v=20261122c';
 import { qrot } from './math.js';
 import { groundQuery, heightAt, AIRPORTS, NAVAIDS, fromLocal, toLocal, WATER_LEVEL, findRunway, runwayEnd, inWorld, waterFrac, ll2w } from './geo.js';
 import { createTerrainMaterial, Terrain } from './terrain.js';
-import { buildAircraft, animateAircraft } from './aircraft.js?v=20261122b';
-import { Panel } from './panel.js?v=20261122b';
-import { Avionics, ILS } from './avionics.js?v=20261122b';
+import { buildAircraft, animateAircraft } from './aircraft.js?v=20261122c';
+import { Panel } from './panel.js?v=20261122c';
+import { Avionics, ILS } from './avionics.js?v=20261122c';
 import { Environment } from './env.js';
 import { buildAirports, RockField, Forest, GrassField } from './world.js';
-import { Scenery } from './scenery.js?v=20261122b';
-import { Traffic } from './traffic.js?v=20261122b';
+import { Scenery } from './scenery.js?v=20261122c';
+import { Traffic } from './traffic.js?v=20261122c';
 import { buildLife } from './life.js';
-import { MovingMap } from './map.js?v=20261122b';
+import { MovingMap } from './map.js?v=20261122c';
 import { Sound } from './audio.js';
 import { setAniso } from './textures.js';
-import { ATC } from './atc.js?v=20261122b';
+import { ATC } from './atc.js?v=20261122c';
 import { initCesium, syncCesiumCamera, getCesiumElevationWorld, warmCesiumTerrain } from './cesium.js?v=20261120';
 
 const $ = (id) => document.getElementById(id);

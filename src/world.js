@@ -321,13 +321,11 @@ export class Forest {
       if (h < WATER_LEVEL + 1.5) { rnd(); continue; }
       const n = normalAt(wx, wz, 4); const slope = 1 - n[1];
       let f = forestAt(wx, wz, h, slope);
-      // sparse trees along field edges / hedgerows & isolated trees
-      const fa = farmAt(wx, wz, h, slope);
-      if (fa > 0.3) { const hx = Math.abs(((wx / 260) % 1 + 1) % 1 - 0.5), hz = Math.abs(((wz / 190) % 1 + 1) % 1 - 0.5); if (Math.min(hx, hz) < 0.03) f = Math.max(f, 0.55); }
-      if (rnd() > f * 0.95 + 0.004) continue;
+      // trees only where ESA WorldCover maps tree cover (towns get theirs from scenery.js: OSM trees + canopy)
+      if (rnd() > f * 0.95) continue;
       if (surfaceAt(wx, wz, h) !== 'grass') continue;
       // avoid town
-      if (townAt(wx, wz) > 0.5 && rnd() < 0.8) continue;
+      if (townAt(wx, wz) > 0.35) continue;
       const ht = 9 + rnd() * 16 * (h > 900 ? 0.7 : 1);
       tmp.position.set(wx, h - 0.3, wz); tmp.rotation.set(0, rnd() * 6.28, 0); tmp.scale.set(ht * (0.9 + rnd() * 0.3), ht, ht * (0.9 + rnd() * 0.3)); tmp.updateMatrix();
       c.push(tmp.matrix.clone());

@@ -285,6 +285,33 @@ export function roadNear(x, z, maxD = 60) {
 }
 export function onRoad(x, z) { const n = roadNear(x, z, 30); return n && n.d < n.road.w / 2 + 0.3 ? n : null; }
 
+// ---------------- real OSM buildings + mapped trees (1 km binary tiles, fetched only when the camera is near) ----------------
+export const BLD_TILE = 1000;
+let bldIndex = null;
+const bldCache = new Map();
+/** -> { rects: [{x,z,w,d,yaw,h,type,roof}], polys: [{h,type,p:[[x,z]...]}], trees: [{x,z,h,kind}] } in world metres */
+export function bldTile(cx, cz) {
+  const key = cx + '_' + cz;
+  let p = bldCache.get(key); if (p) return p;
+  if (!bldIndex) bldIndex = json('bld/index.json').then((a) => new Set(a)).catch(() => new Set());
+  p = bldIndex.then((set) => {
+    if (!set.has(key)) return { rects: [], polys: [], trees: [] };
+    return fetch(new URL('bld/' + key + '.bin' + DV, DATA)).then((r) => (r.ok ? r.arrayBuffer() : null)).then((buf) => {
+      if (!buf) return { rects: [], polys: [], trees: [] };
+      const v = new DataView(buf); const ox = cx * BLD_TILE - 500, oz = cz * BLD_TILE - 500; let o = 8;
+      const nR = v.getUint16(0, true), nP = v.getUint16(2, true), nT = v.getUint16(4, true);
+      const rects = new Array(nR), polys = new Array(nP), trees = new Array(nT);
+      for (let i = 0; i < nR; i++, o += 10) rects[i] = { x: ox + v.getUint16(o, true) / 20, z: oz + v.getUint16(o + 2, true) / 20, w: v.getUint8(o + 4) / 2, d: v.getUint8(o + 5) / 2, yaw: v.getUint8(o + 6) / 256 * Math.PI, h: v.getUint8(o + 7) / 2, type: v.getUint8(o + 8), roof: v.getUint8(o + 9) };
+      for (let i = 0; i < nP; i++) { const n = v.getUint16(o, true), h = v.getUint8(o + 2) / 2, type = v.getUint8(o + 3); o += 4; const pts = new Array(n); for (let k = 0; k < n; k++, o += 4) pts[k] = [ox + v.getUint16(o, true) / 20, oz + v.getUint16(o + 2, true) / 20]; polys[i] = { h, type, p: pts }; }
+      for (let i = 0; i < nT; i++, o += 6) trees[i] = { x: ox + v.getUint16(o, true) / 20, z: oz + v.getUint16(o + 2, true) / 20, h: v.getUint8(o + 4), kind: v.getUint8(o + 5) };
+      return { rects, polys, trees };
+    });
+  }).catch(() => ({ rects: [], polys: [], trees: [] }));
+  bldCache.set(key, p);
+  if (bldCache.size > 120) { const k0 = bldCache.keys().next().value; bldCache.delete(k0); }
+  return p;
+}
+
 // ---------------- streets (streamed tiles) ----------------
 export const STREET_TILE = 4000;
 const STREET_SET = new Set(STREETIDX);
