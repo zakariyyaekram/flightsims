@@ -89,6 +89,7 @@ function pavementMaterial(asph, markTex, tint = 1) {
         diffuseColor.rgb *= 1.0 - mk.b*0.62;`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.55, max(mk.r,mk.g)); roughnessFactor = mix(roughnessFactor, 0.6, mk.b);');
   };
+  m.userData.markTex = markTex;
   return m;
 }
 
@@ -208,7 +209,7 @@ function boxUV(w, h, d, scale = 4) {
   return g;
 }
 
-export async function buildAirports(scene, envMap, buildAircraftFn, elevationProvider = null) {
+export async function buildAirports(scene, envMap, buildAircraftFn, elevationProvider = null, airportList = AIRPORTS) {
   const [asph, concrete, corr, plaster, roofT] = await Promise.all([
     pbr('asphalt_02', 1), pbr('concrete_floor_02', 1), pbr('corrugated_iron_02', 1), pbr('painted_plaster_wall', 1), pbr('grey_roof_01', 1),
   ]);
@@ -221,7 +222,7 @@ export async function buildAirports(scene, envMap, buildAircraftFn, elevationPro
   const darkGlass = new THREE.MeshPhysicalMaterial({ color: 0x223040, roughness: 0.05, metalness: 0.2, envMapIntensity: 1.5 });
   const doorM = new THREE.MeshStandardMaterial({ color: 0x24282c, roughness: 0.5, metalness: 0.6 });
   const concreteM = new THREE.MeshStandardMaterial({ map: concrete.diff, normalMap: concrete.nor, roughness: 0.95 });
-  for (const a of AIRPORTS) {
+  for (const a of airportList) {
     const ang = -a.hdg * D2R; // rotation about Y so local +u aligns with runway direction
     const airportHeight = (x, z) => {
       const cesiumHeight = elevationProvider?.(x, z);
@@ -401,7 +402,7 @@ export async function buildAirports(scene, envMap, buildAircraftFn, elevationPro
   if (buildAircraftFn) {
     const regs = [['N5284Q', 1], ['N738HP', 2], ['N12KD', 3], ['N64220', 1]];
     let i = 0;
-    for (const a of AIRPORTS) {
+    for (const a of airportList) {
       const n = a.icao === 'KSFO' ? 3 : 1;
       for (let k = 0; k < n; k++) {
         const [reg, sch] = regs[i++ % regs.length];
@@ -443,7 +444,21 @@ export async function buildAirports(scene, envMap, buildAircraftFn, elevationPro
     }
     bc.needsUpdate = true;
   };
-  return { group, updateLights, parked };
+  // free GPU memory for this airport set (shared, cached photo textures are left alone)
+  const dispose = () => {
+    scene.remove(group);
+    group.traverse((o) => {
+      o.geometry?.dispose();
+      const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
+      for (const m of mats) {
+        if (m.map?.isCanvasTexture) m.map.dispose();
+        m.userData.markTex?.dispose();
+        m.dispose();
+      }
+    });
+    for (const a of airportList) { delete a.windsock; delete a.towerPos; }
+  };
+  return { group, updateLights, parked, dispose };
 }
 
 // ---------------- Rocks (photoscanned, instanced) ----------------

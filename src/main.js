@@ -73,6 +73,40 @@ function cesiumGroundQuery(x, z) {
   };
 }
 
+// ---- Light Edition: only load the area around the aircraft ----
+const LIGHT_RADIUS = 8000;            // m of terrain built/drawn around the camera
+const LIGHT_AIRPORT_LOAD = LIGHT_RADIUS + 2500;   // airports whose center is within this get built
+const LIGHT_AIRPORT_UNLOAD = LIGHT_AIRPORT_LOAD + 4000; // ...and freed once beyond this (hysteresis)
+
+// Streams airports (runways, buildings, lights, parked aircraft) in and out around the aircraft.
+class LocalAirports {
+  constructor(scene, buildAircraftFn) {
+    this.scene = scene; this.buildAircraftFn = buildAircraftFn;
+    this.loaded = new Map(); this.loading = new Map();
+  }
+  update(pos) {
+    const jobs = [];
+    for (const a of AIRPORTS) {
+      const d = Math.hypot(a.x - pos.x, a.z - pos.z);
+      if (d < LIGHT_AIRPORT_LOAD && !this.loaded.has(a.icao)) {
+        if (!this.loading.has(a.icao)) {
+          const job = buildAirports(this.scene, null, this.buildAircraftFn, null, [a])
+            .then((r) => { this.loading.delete(a.icao); this.loaded.set(a.icao, r); })
+            .catch((e) => { this.loading.delete(a.icao); console.warn('Airport load failed', a.icao, e); });
+          this.loading.set(a.icao, job);
+        }
+        jobs.push(this.loading.get(a.icao));
+      } else if (d > LIGHT_AIRPORT_UNLOAD && this.loaded.has(a.icao)) {
+        this.loaded.get(a.icao).dispose();
+        this.loaded.delete(a.icao);
+      }
+    }
+    return Promise.all(jobs);
+  }
+  updateLights(camPos, night, t) { for (const r of this.loaded.values()) r.updateLights(camPos, night, t); }
+}
+
+let airportStreamTick = 0;
 let env, terrain, terrainMat, aircraft, airports, rocks, forest, grass, town, life, mmap;
 const loadBar = $('loadBar'), loadText = $('loadText');
 let loadMode = null;
@@ -110,7 +144,11 @@ async function init() {
       (p) => progress(0.38 + p * 0.12, 'Loading terrain textures…'),
       loadMode === 'light' ? 512 : 1024,
     );
-    terrain = new Terrain(scene, terrainMat);
+    terrain = loadMode === 'light'
+      ? new Terrain(scene, terrainMat, { radius: LIGHT_RADIUS, maxTileSize: 4096, minTileSize: 256, lodScale: 1.0 })
+      : new Terrain(scene, terrainMat);
+    // haze reaches ~full opacity at the edge of the loaded area
+    env.minFogDensity = loadMode === 'light' ? 2.0 / LIGHT_RADIUS : 0;
   }
   airports = null;
   rocks = null;
@@ -126,15 +164,24 @@ async function init() {
   aircraft.traverse((o) => { if (o.isMesh) o.receiveShadow = true; });
   scene.add(aircraft);
   sim.panel.buildHotspots(sim);
-  progress(0.58, 'Building airports, runways and taxiways…');
-  airports = await buildAirports(
-    scene,
-    null,
-    buildAircraft,
-    cesiumViewer ? getCesiumElevationWorld : null,
-  );
-  progress(0.66, 'Building airport terminals and hangars…');
-  applySetup(readSetup(), true);
+  if (loadMode === 'light') {
+    // spawn first, then build only the airports near the aircraft
+    airports = new LocalAirports(scene, buildAircraft);
+    applySetup(readSetup(), true);
+    progress(0.58, 'Building nearby airport…');
+    await airports.update({ x: sim.fdm.pos[0], z: sim.fdm.pos[2] });
+    progress(0.66, 'Local area ready…');
+  } else {
+    progress(0.58, 'Building airports, runways and taxiways…');
+    airports = await buildAirports(
+      scene,
+      null,
+      buildAircraft,
+      cesiumViewer ? getCesiumElevationWorld : null,
+    );
+    progress(0.66, 'Building airport terminals and hangars…');
+    applySetup(readSetup(), true);
+  }
   sim.ready = true;
   await new Promise((resolve) => requestAnimationFrame(resolve));
 
@@ -331,6 +378,7 @@ function applySetup(s, warmOnly = false) {
   if (terrain) {
     terrain.warm(cam, F.pos[1] - gh);
   }
+  if (airports?.update) airports.update(cam);
   if (forest && rocks) {
     for (let i = 0; i < 40; i++) { forest.update(cam, 200); rocks.update(cam, 200); }
   }
@@ -854,6 +902,7 @@ mapC.addEventListener('dblclick', (e) => {
   if (air) F.trimAir(0);
   F.kollsman = Math.round(sim.weather.qnhInHg * 100) / 100;
   if (terrain) terrain.warm(new THREE.Vector3(x, alt, z), alt - gh);
+  if (airports?.update) airports.update({ x, z });
   mmap.track = []; mapView.follow = true; mapView.center = null;
   toast('Repositioned');
 });
@@ -935,6 +984,7 @@ function frame(dtReal) {
   camPos.copy(camera.position);
   // world streaming
   const agl = camPos.y - heightAt(camPos.x, camPos.z);
+  if (airports?.update && (airportStreamTick = (airportStreamTick + 1) % 30) === 0) airports.update(camPos);
   if (terrain) {
     terrain.update(camPos, agl, 6);
     if (terrainMat) terrainMat.userData.uniforms.uCam.value.copy(camPos);

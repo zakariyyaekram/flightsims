@@ -175,8 +175,14 @@ class Tile {
 }
 
 export class Terrain {
-  constructor(scene, material) {
+  // opts.radius: only build/draw tiles within this horizontal distance of the camera (local-area mode).
+  // opts.maxTileSize: never draw tiles larger than this (avoids building huge region-wide tiles).
+  constructor(scene, material, opts = {}) {
     this.scene = scene; this.material = material;
+    this.radius = opts.radius ?? Infinity;
+    this.maxTileSize = opts.maxTileSize ?? Infinity;
+    this.minTileSize = opts.minTileSize ?? MIN_SIZE; // finest tile size
+    this.lodScale = opts.lodScale ?? 1.35;           // lower = coarser detail falls off sooner
     this.root = new Tile(0, 0, WORLD_HALF * 2, 0);
     this.queue = new Set();
     this.group = new THREE.Group();
@@ -248,13 +254,20 @@ export class Terrain {
     this.built++;
   }
 
+  outside(t, cam) {
+    if (!Number.isFinite(this.radius)) return false;
+    const dx = Math.max(Math.abs(cam.x - t.x) - t.size / 2, 0), dz = Math.max(Math.abs(cam.z - t.z) - t.size / 2, 0);
+    return Math.hypot(dx, dz) > this.radius;
+  }
+
   shouldSplit(t, cam, agl) {
-    if (t.size <= MIN_SIZE) return false;
+    if (t.size > this.maxTileSize) return true;
+    if (t.size <= this.minTileSize) return false;
     if (t.size <= 256 && agl > 900) return false;
     const dx = Math.max(Math.abs(cam.x - t.x) - t.size / 2, 0), dz = Math.max(Math.abs(cam.z - t.z) - t.size / 2, 0);
     const dy = Math.max(0, cam.y - (t.maxH ?? 300));
     const d = Math.hypot(dx, dz, dy * 0.7);
-    return d < t.size * 1.35;
+    return d < t.size * this.lodScale;
   }
 
   ensureChildren(t) {
@@ -266,13 +279,19 @@ export class Terrain {
   }
 
   select(t, cam, agl, out) {
+    if (this.outside(t, cam)) return; // beyond the local area: never built, never drawn
     t.lastUsed = this.frame;
+    if (t.size > this.maxTileSize) {
+      // too large to ever draw in local-area mode: always descend
+      for (const c of this.ensureChildren(t)) this.select(c, cam, agl, out);
+      return;
+    }
     if (this.shouldSplit(t, cam, agl)) {
       const ch = this.ensureChildren(t);
       // descend only if every child (or its replacement) can draw
-      const ready = ch.every((c) => c.mesh);
+      const ready = ch.every((c) => c.mesh || this.outside(c, cam));
       if (ready) { for (const c of ch) this.select(c, cam, agl, out); return; }
-      for (const c of ch) if (!c.mesh) this.queue.add(c);
+      for (const c of ch) if (!c.mesh && !this.outside(c, cam)) this.queue.add(c);
     }
     if (!t.mesh) { this.queue.add(t); return; }
     out.push(t);
@@ -302,7 +321,12 @@ export class Terrain {
   evict(t) {
     if (!t.children) return;
     for (const c of t.children) this.evict(c);
-    if (t.children.every((c) => this.frame - c.lastUsed > 600 && !c.children)) {
+    const stale = (c) => this.frame - c.lastUsed > 600;
+    // local-area mode: free leaf tiles that have fallen behind the aircraft right away
+    if (Number.isFinite(this.radius)) {
+      for (const c of t.children) if (!c.children && c.mesh && stale(c)) { this.group.remove(c.mesh); c.mesh.geometry.dispose(); c.mesh = null; }
+    }
+    if (t.children.every((c) => stale(c) && !c.children)) {
       for (const c of t.children) if (c.mesh) { this.group.remove(c.mesh); c.mesh.geometry.dispose(); c.mesh = null; }
       t.children = null;
     }

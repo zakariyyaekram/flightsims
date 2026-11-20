@@ -178,6 +178,8 @@ export class Environment {
     this.sky.position.copy(cam.position);
     const visM = (this.visKm || 40) * 1000;
     let dens = 3.0 / visM;
+    // local-area (Light Edition) scenery: thicken haze so the edge of the loaded area is never visible
+    if (this.minFogDensity) dens = Math.max(dens, this.minFogDensity);
     // inside cloud layer => IMC
     const inCloud = this.cover > 0.55 && cam.position.y > this.cloudBase - 20 && cam.position.y < this.cloudBase + 380;
     this.inCloud = inCloud;
