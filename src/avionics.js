@@ -40,6 +40,10 @@ export class Avionics {
     this.hdgBug = 270;
     this.ap = { on: false, lat: 'ROL', vert: 'VS', vsSel: 0, altSel: 3000, gsArmed: false, locArmed: false, iBank: 0, iPitch: 0, trimTimer: 0 };
     this.r1 = {}; this.r2 = {};
+    // Bendix/King KLN 94 GPS (172S only). src = CDI 1 source selected by the NAV/GPS switch.
+    this.gps = { on: true, bright: 0.8, test: 3, page: 'NAV', prev: 'NAV', mode: 'LEG', range: 10, declutter: false, cursor: false, sel: 0, dtoSel: 0,
+      wpt: null, origin: null, src: 'NAV', baro: 29.92, msgs: [], arrived: false };
+    this.gpsR = { valid: false }; this.cdi1 = {};
     this.adf = { freq: 344, standby: 362, on: true, vol: 0.7, mode: 'ADF', bfo: false, timer: 'FLT', flt: 0, et: 0 };
   }
 
@@ -96,10 +100,53 @@ export class Avionics {
     const P = typeof powered === 'object' ? powered : { nav1: powered, nav2: powered, ap: powered, adf: powered };
     this.r1 = P.nav1 ? this.receive(this.nav1, pos, altFt) : { valid: false };
     this.r2 = P.nav2 ? this.receive(this.nav2, pos, altFt) : { valid: false };
+    this.gpsUpdate(f, dt, !!P.gps);
+    this.cdi1 = this.gps.src === 'GPS' && P.gps !== undefined ? this.gpsR : this.r1;
     if (!P.ap && this.ap.on) this.disconnect(true);
     // KR 87 flight timer runs while powered; elapsed timer always counts up when powered
     if (P.adf && this.adf.on !== false) { this.adf.flt += dt; this.adf.et += dt; }
     return this.autopilot(f, dt);
+  }
+
+  // ---- KLN 94 GPS
+  // waypoint database: airports and VORs, sorted by distance from pos
+  gpsWaypoints(pos) {
+    const all = [...AIRPORTS.map((a) => ({ ident: a.icao, name: a.name, x: a.x, z: a.z, type: 'APT', elev: a.elev })), ...NAVAIDS.filter((n) => n.type === 'VOR').map((n) => ({ ident: n.ident, name: n.name, x: n.x, z: n.z, type: 'VOR', freq: n.freq }))];
+    for (const w of all) { const dx = w.x - pos[0], dz = w.z - pos[2]; w.dist = Math.hypot(dx, dz) / NM; w.brg = (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360; }
+    return all.sort((a, b) => a.dist - b.dist);
+  }
+  gpsMsg(m) { const g = this.gps; if (!g.msgs.includes(m)) g.msgs.push(m); g.msgNew = true; }
+  gpsUpdate(f, dt, powered) {
+    const g = this.gps;
+    if (!powered || !g.on) { this.gpsR = { valid: false, kind: 'GPS' }; g.test = 3; g.ok = false; return; }
+    g.ok = true;
+    if (g.test > 0) { g.test -= dt; if (g.test <= 0 && !g.wpt) g.page = 'NAV'; }
+    const pos = f.pos;
+    g.gs = Math.hypot(f.vel[0], f.vel[2]) / 0.5144;
+    g.trk = g.gs > 2 ? (Math.atan2(f.vel[0], -f.vel[2]) * 180 / Math.PI + 360) % 360 : null;
+    g.list = this.gpsWaypoints(pos);
+    g.nrst = g.list.filter((w) => w.type === 'APT').slice(0, 9);
+    const w = g.wpt;
+    if (!w || g.test > 0) { this.gpsR = { valid: false, kind: 'GPS' }; g.nav = null; return; }
+    const dx = w.x - pos[0], dz = w.z - pos[2], dist = Math.hypot(dx, dz) / NM, brg = (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360;
+    // course line: LEG = origin -> waypoint, OBS = selected OBS course through the waypoint
+    const o = g.origin || { x: pos[0], z: pos[2] };
+    const dtk = g.mode === 'OBS' ? this.nav1.obs : (Math.atan2(w.x - o.x, -(w.z - o.z)) * 180 / Math.PI + 360) % 360;
+    const c = dtk * Math.PI / 180, ux = Math.sin(c), uz = -Math.cos(c);
+    const xtk = ((pos[0] - w.x) * -uz + (pos[2] - w.z) * ux) / NM; // + = right of course
+    const toFrom = Math.abs(angDiff(dtk, brg)) < 90 ? 1 : -1;
+    const fs = dist < 30 && w.type === 'APT' ? 1 : 5; // TERM (1 NM) / ENR (5 NM) CDI scaling
+    const ete = g.gs > 20 ? dist / g.gs * 3600 : null;
+    g.nav = { ident: w.ident, dist, brg, dtk, xtk, toFrom, fs, ete, scale: fs === 1 ? 'TERM' : 'ENR' };
+    if (ete != null && ete < 36 && toFrom > 0 && !g.arrived) { g.arrived = true; this.gpsMsg('ARRIVAL AT WAYPOINT ' + w.ident); }
+    g.wptAlert = ete != null && ete < 36 && toFrom > 0;
+    this.gpsR = { valid: true, kind: 'GPS', dev: clamp(-xtk / fs, -1, 1), toFrom, course: dtk, ident: w.ident, dme: dist, gsValid: false };
+  }
+  gpsDirect(w, f) {
+    const g = this.gps; if (!w) return;
+    g.wpt = { ident: w.ident, name: w.name, x: w.x, z: w.z, type: w.type };
+    g.origin = { x: f.pos[0], z: f.pos[2] }; g.arrived = false; g.mode = 'LEG'; g.page = 'NAV'; g.cursor = false;
+    this.gpsMsg('DIRECT TO ' + w.ident + ' — SET OBS ' + String(Math.round(g.wpt && (Math.atan2(w.x - f.pos[0], -(w.z - f.pos[2])) * 180 / Math.PI + 360) % 360)).padStart(3, '0'));
   }
 
   disconnect(alert = false) {
@@ -123,12 +170,12 @@ export class Avionics {
     // --- lateral ---
     const hdgGyro = (att.hdg - f.gyro.hiDrift + 360) % 360;
     let bankCmd = 0;
-    let r = this.r1;
+    let r = this.cdi1 || this.r1;
     if (ap.lat === 'HDG') bankCmd = clamp(angDiff(this.hdgBug, hdgGyro) * 1.4, -20, 20);
     else if (ap.lat === 'NAV' || ap.lat === 'APR' || ap.lat === 'REV') {
       if (r.valid) {
         const rev = ap.lat === 'REV';
-        const course = rev && r.kind === 'ILS' ? (r.course + 180) % 360 : r.kind === 'ILS' ? r.course : this.nav1.obs;
+        const course = rev && r.kind === 'ILS' ? (r.course + 180) % 360 : (r.kind === 'ILS' || r.kind === 'GPS') ? r.course : this.nav1.obs;
         if (rev) r = { ...r, dev: -r.dev };
         const fs = r.kind === 'ILS' ? 1.0 : 1.0;
         const intercept = clamp(r.dev * 60 * fs, -45, 45);

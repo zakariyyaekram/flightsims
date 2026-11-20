@@ -303,7 +303,7 @@ function smallRoundFace(g, title, lo, hi, ranges, labels, sub = '') {
 
 // ---------------------------------------------------------------- panel
 const CB_172_MAIN = [['FLAP', 10], ['INST', 5], ['TURN COORD', 5], ['ALT FLD', 5], ['WARN', 5], ['CABIN LT', 5], ['INST LT', 5], ['FUEL PUMP', 5], ['BCN', 5], ['LAND LT', 15], ['TAXI LT', 10], ['NAV LT', 5], ['STROBE', 5], ['PITOT HT', 10]];
-const CB_172_AVN = [['AVN BUS 1', 15], ['AVN BUS 2', 15], ['AUDIO', 5], ['NAV/COM 1', 5], ['NAV/COM 2', 5], ['ADF', 3], ['XPDR', 2], ['AUTOPILOT', 5], ['AVN FAN', 3]];
+const CB_172_AVN = [['AVN BUS 1', 15], ['AVN BUS 2', 15], ['AUDIO', 5], ['NAV/COM 1', 5], ['NAV/COM 2', 5], ['ADF', 3], ['XPDR', 2], ['AUTOPILOT', 5], ['GPS', 5], ['AVN FAN', 3]];
 const CB_152 = [['ALT FLD', 5], ['INST', 5], ['TURN COORD', 5], ['FLAP', 15], ['BCN', 5], ['LAND LT', 15], ['TAXI LT', 10], ['NAV LT', 5], ['STROBE', 5], ['PITOT HT', 10], ['CABIN LT', 5], ['AVN BUS 1', 15], ['AUDIO', 5], ['NAV/COM 1', 5], ['ADF', 3], ['XPDR', 2]];
 
 export class Panel {
@@ -381,11 +381,11 @@ export class Panel {
     // crinkle texture on overlays
     { const id = g.getImageData(0, 0, PW, PH_); const d = id.data; let s = 5; for (let i = 0; i < d.length; i += 4) { s = (s * 1103515245 + 12345) & 0x7fffffff; const n = ((s >> 16) & 255) / 255 - 0.5; d[i] += n * 9; d[i + 1] += n * 9; d[i + 2] += n * 9; } g.putImageData(id, 0, 0); }
     // radio stack bay
-    g.fillStyle = '#0b0c0d'; roundRect(g, this.stack.x - 10, this.stack.y - 12, this.stack.w + 20, 560, 6); g.fill();
-    for (let i = 0; i < 9; i++) screw(g, this.stack.x - 4, this.stack.y + 20 + i * 62, 3.4), screw(g, this.stack.x + this.stack.w + 4, this.stack.y + 20 + i * 62, 3.4);
+    g.fillStyle = '#0b0c0d'; roundRect(g, this.stack.x - 10, this.stack.y - 12, this.stack.w + 20, 660, 6); g.fill();
+    for (let i = 0; i < 11; i++) screw(g, this.stack.x - 4, this.stack.y + 20 + i * 62, 3.4), screw(g, this.stack.x + this.stack.w + 4, this.stack.y + 20 + i * 62, 3.4);
     // lower centre (below stack) engine control area
-    g.fillStyle = '#2f3134'; roundRect(g, 992, 600, 330, 414, 10); g.fill();
-    g.strokeStyle = 'rgba(255,255,255,0.06)'; g.lineWidth = 1.5; roundRect(g, 993, 601, 328, 412, 10); g.stroke();
+    g.fillStyle = '#2f3134'; roundRect(g, 992, 694, 330, 320, 10); g.fill();
+    g.strokeStyle = 'rgba(255,255,255,0.06)'; g.lineWidth = 1.5; roundRect(g, 993, 695, 328, 318, 10); g.stroke();
     // placards
     g.fillStyle = '#0d0d0d'; roundRect(g, 74, 30, 140, 24, 3); g.fill(); engrave(g, 'N172SP', 144, 42, 15, '#e8e8e8', 'center', 700);
     engrave(g, 'MANEUVERING SPEED  105 KIAS', 610, 30, 10.5, '#d8d8d2');
@@ -431,7 +431,7 @@ export class Panel {
     let y = this.stack.y;
     // KMA 26 audio panel
     R.kma = y; unit(y, 62, '', ''); text(g, 'KMA 26', sx + 236, y + 55, 7.5, '#c4c8cc', 'right', 700); y += 70;
-    if (type === 'C172') { R.nc1 = y; y += 128; R.nc2 = y; y += 128; } else { R.nc1 = y; y += 128; }
+    if (type === 'C172') { R.gps = y; y += 102; R.nc1 = y; y += 128; R.nc2 = y; y += 128; } else { R.nc1 = y; y += 128; }
     R.adf = y; y += 72; R.xpdr = y; y += 72; if (type === 'C172') { R.ap = y; y += 72; }
     for (const k of type === 'C172' ? ['nc1', 'nc2'] : ['nc1']) {
       const yy = R[k]; unit(yy, 120, 'BENDIX/KING', 'KX 155A  NAV/COMM');
@@ -439,6 +439,12 @@ export class Panel {
       text(g, 'COMM', sx + 20, yy + 66, 8, '#c7c7c7', 'left', 700); text(g, 'NAV', sx + 166, yy + 66, 8, '#c7c7c7', 'left', 700);
       text(g, 'PULL TEST', sx + 26, yy + 113, 6.5, '#9a9a9a'); text(g, 'PULL IDENT', sx + 178, yy + 113, 6.5, '#9a9a9a');
       text(g, 'PULL 25K', sx + 118, yy + 113, 6.5, '#9a9a9a');
+    }
+    if (R.gps != null) { // KLN 94 colour GPS
+      const y = R.gps; unit(y, 96, '', '');
+      text(g, 'BENDIX/KING', sx + 283, y + 6, 6, '#9aa0a6', 'center', 700); text(g, 'KLN 94', sx + 22, y + 90, 7.5, '#c4c8cc', 'center', 700);
+      g.fillStyle = '#020305'; roundRect(g, sx + 42, y + 4, 218, 66, 3); g.fill();
+      text(g, 'BRT', sx + 22, y + 27, 6, '#bbb'); text(g, 'RANGE', sx + 22, y + 52, 6, '#bbb'); text(g, 'PAGE', sx + 284, y + 90, 6, '#bbb');
     }
     unit(R.adf, 64, 'BENDIX/KING', 'KR 87  ADF'); disp(sx + 14, R.adf + 8, 200, 30);
     unit(R.xpdr, 64, 'BENDIX/KING', 'KT 76C'); disp(sx + 62, R.xpdr + 8, 150, 30);
@@ -502,6 +508,27 @@ export class Panel {
     const av = () => sim.av, f = () => sim.fdm, R = this.R, { x: sx } = this.stack;
     const wrapF = (v, d, lo, hi) => { const mhz = Math.floor(v + 1e-6), k = v - mhz; let m = mhz + d; const span = hi - lo + 1; m = ((m - lo) % span + span) % span + lo; return Math.round((m + k) * 1000) / 1000; };
     const wrapK = (v, dk, top) => { const mhz = Math.floor(v + 1e-6); let k = Math.round((v - mhz) * 1000) + dk; if (k >= 1000) k -= 1000; if (k < 0) k += 1000; if (k > top) k = dk > 0 ? 0 : top; return Math.round((mhz + k / 1000) * 1000) / 1000; };
+    if (R.gps != null) { // KLN 94
+      const y = R.gps, G = () => av().gps, F = () => f();
+      const PAGES = ['NAV', 'MAP', 'NRST', 'ALT'];
+      const go = (pg) => { const g = G(); if (g.page !== pg) g.prev = g.page; g.page = pg; };
+      add(circ(sx + 22, y + 14, 10), 'gpsPwr', { click: () => { const g = G(); g.on = !g.on; if (g.on) g.test = 3; }, wheel: (d) => { const g = G(); g.bright = clamp(g.bright - Math.sign(d) * 0.1, 0.2, 1); }, tip: () => `GPS power / brightness — ${G().on ? 'ON' : 'OFF'} (click = power, scroll = brightness)` });
+      add(rect(sx + 6, y + 34, 32, 11), 'gpsCrsrL', { click: () => { const g = G(); g.declutter = !g.declutter; }, tip: () => `Left CRSR — map declutter (${G().declutter ? 'VORs hidden' : 'all waypoints'})` });
+      add(circ(sx + 22, y + 71, 13), 'gpsRange', { click: (b) => { const g = G(), r = [2, 5, 10, 20, 40, 80]; g.range = r[clamp(r.indexOf(g.range) + step(b), 0, 5)]; }, wheel: (d) => { const g = G(), r = [2, 5, 10, 20, 40, 80]; g.range = r[clamp(r.indexOf(g.range) + Math.sign(d), 0, 5)]; }, tip: () => `Map range ${G().range} NM — click = zoom out, right-click = zoom in, scroll` });
+      const btn = (i, n, fn, tip) => add(rect(sx + 44 + i * 31, y + 74, 28, 15), 'gps' + n, { click: fn, tip });
+      btn(0, 'MSG', () => { const g = G(); if (g.page === 'MSG') { g.page = g.prev || 'NAV'; g.msgs = []; } else { go('MSG'); g.msgNew = false; } }, () => `MSG — ${G().msgs.length ? G().msgs.length + ' message(s)' : 'no messages'}`);
+      btn(1, 'OBS', () => { const g = G(); g.mode = g.mode === 'OBS' ? 'LEG' : 'OBS'; }, () => `OBS — ${G().mode} mode (OBS: course set with the NAV 1 OBS knob)`);
+      btn(2, 'ALT', () => { const g = G(); if (g.page === 'ALT') g.page = g.prev || 'NAV'; else go('ALT'); }, 'ALT — altitude / baro page');
+      btn(3, 'NRST', () => { const g = G(); go('NRST'); g.sel = 0; g.cursor = true; }, 'NRST — nearest airports');
+      btn(4, 'D→', () => { const g = G(); const list = g.list || []; let w = g.page === 'NRST' && g.nrst?.[g.sel] ? g.nrst[g.sel] : g.wpt ? list.find((x) => x.ident === g.wpt.ident) : list.find((x) => x.type === 'APT'); go('DTO'); g.dtoSel = Math.max(0, list.indexOf(w)); }, 'Direct-To — pick a waypoint, then ENT');
+      btn(5, 'CLR', () => { const g = G(); if (g.page === 'DTO') g.page = g.prev || 'NAV'; else { g.page = 'NAV'; } g.cursor = false; }, 'CLR — cancel / back to NAV page');
+      btn(6, 'ENT', () => { const g = G(); if (g.page === 'DTO') av().gpsDirect(g.list?.[g.dtoSel], F()); else if (g.page === 'NRST' && g.cursor && g.nrst?.[g.sel]) { const w = g.nrst[g.sel]; go('DTO'); g.dtoSel = Math.max(0, (g.list || []).indexOf(w)); } }, 'ENT — confirm (activates Direct-To)');
+      add(rect(sx + 266, y + 13, 34, 13), 'gpsCrsrR', { click: () => { const g = G(); g.cursor = !g.cursor; }, tip: () => `Right CRSR — cursor ${G().cursor ? 'ON' : 'OFF'}` });
+      const inner = (dir) => { const g = G(); if (g.page === 'DTO') g.dtoSel = clamp(g.dtoSel + dir, 0, Math.max(0, (g.list?.length || 1) - 1)); else if (g.page === 'NRST') g.sel = clamp(g.sel + dir, 0, Math.max(0, (g.nrst?.length || 1) - 1)); else if (g.page === 'MAP') { const r = [2, 5, 10, 20, 40, 80]; g.range = r[clamp(r.indexOf(g.range) + dir, 0, 5)]; } else if (g.page === 'ALT') g.baro = Math.round((g.baro + dir * 0.01) * 100) / 100; else if (g.page === 'NAV') g.navSub = !g.navSub; };
+      const outer = (dir) => { const g = G(); const i = PAGES.indexOf(g.page); go(PAGES[((i < 0 ? 0 : i) + dir + PAGES.length) % PAGES.length]); };
+      add(circ(sx + 284, y + 58, 10), 'gpsInner', { click: (b) => inner(step(b)), wheel: (d) => inner(Math.sign(d)), tip: 'Right inner knob — select (waypoint / list / range / baro)' });
+      add(circ(sx + 284, y + 58, 19, 10), 'gpsOuter', { click: (b) => outer(step(b)), wheel: (d) => outer(Math.sign(d)), tip: () => `Right outer knob — page (${G().page})` });
+    }
     // KMA 26
     {
       const y = R.kma, a = () => av().audio;
@@ -613,7 +640,7 @@ export class Panel {
     const step = (b) => (b === 2 ? -1 : 1);
 
     // throttle (black, large) & mixture (red, ribbed, with lock button)
-    const thrPos = C172 ? [1100, 760] : [1110, 800], mixPos = C172 ? [1232, 760] : [1232, 800];
+    const thrPos = C172 ? [1100, 874] : [1110, 800], mixPos = C172 ? [1232, 874] : [1232, 800];
     pushPull({
       x: thrPos[0], y: thrPos[1], knobGeo: smooth(C172 ? 0.0195 : 0.016, 0.03), mat: blackKnob, shaftR: 0.0045, travel: 0.085,
       out: () => 1 - ctl('throttle'),
@@ -630,7 +657,7 @@ export class Panel {
     });
     if (C172) {
       // alternate static air (small black knob)
-      pushPull({ x: 1166, y: 690, knobGeo: smooth(0.008, 0.012), mat: blackKnob, shaftR: 0.0025, travel: 0.025, out: () => (sys('altStatic') ? 1 : 0), hot: { id: 'altStatic', click: () => { f().sys.altStatic = !sys('altStatic'); }, tip: () => `ALTERNATE STATIC AIR — ${sys('altStatic') ? 'OPEN (pulled)' : 'CLOSED'}` } });
+      pushPull({ x: 1166, y: 746, knobGeo: smooth(0.008, 0.012), mat: blackKnob, shaftR: 0.0025, travel: 0.025, out: () => (sys('altStatic') ? 1 : 0), hot: { id: 'altStatic', click: () => { f().sys.altStatic = !sys('altStatic'); }, tip: () => `ALTERNATE STATIC AIR — ${sys('altStatic') ? 'OPEN (pulled)' : 'CLOSED'}` } });
       // cabin heat / cabin air
       pushPull({ x: 1720, y: 800, knobGeo: smooth(0.011, 0.016), mat: std(0x8a1d14, 0.5), shaftR: 0.003, travel: 0.05, out: () => sys('cabinHeat') || 0, hot: { id: 'cabinHeat', click: (b) => { f().sys.cabinHeat = clamp((sys('cabinHeat') || 0) + step(b) * 0.25, 0, 1); }, wheel: (d) => { f().sys.cabinHeat = clamp((sys('cabinHeat') || 0) - Math.sign(d) * 0.1, 0, 1); }, tip: () => `CABIN HEAT ${Math.round((sys('cabinHeat') || 0) * 100)}% — pull for heat` } });
       pushPull({ x: 1850, y: 800, knobGeo: smooth(0.011, 0.016), mat: std(0x1f3f86, 0.5), shaftR: 0.003, travel: 0.05, out: () => sys('cabinAir') || 0, hot: { id: 'cabinAir', click: (b) => { f().sys.cabinAir = clamp((sys('cabinAir') || 0) + step(b) * 0.25, 0, 1); }, wheel: (d) => { f().sys.cabinAir = clamp((sys('cabinAir') || 0) - Math.sign(d) * 0.1, 0, 1); }, tip: () => `CABIN AIR ${Math.round((sys('cabinAir') || 0) * 100)}% — pull for fresh air` } });
@@ -676,7 +703,7 @@ export class Panel {
       const hnd = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.014, 0.012), std(0xf2f2ec, 0.45)); hnd.position.z = 0.032; lev.add(hnd);
       const det = C172 ? [640, 685, 730, 775] : [690, 735, 780, 825];
       this.anims.push(() => { const y = P(fx, det[clamp(ctl('flaps') | 0, 0, 3)]).y; lev.position.y += (y - lev.position.y) * 0.25; });
-      hotMesh(lev, { id: 'flapLever', click: (b) => { f().ctrl.flaps = clamp((ctl('flaps') | 0) + step(b), 0, 3); }, wheel: (d) => { f().ctrl.flaps = clamp((ctl('flaps') | 0) + Math.sign(d), 0, 3); }, tip: () => `WING FLAPS lever ${['UP', '10°', '20°', 'FULL 30°'][ctl('flaps') | 0]} (actual ${Math.round(f().flapPos)}°) — click = next notch down, right-click = up` });
+      hotMesh(lev, { id: 'flapLever', click: (b) => { const uv = sim.panelUV, h = uv && this.hit(uv.x, uv.y); if (b !== 2 && h && /^flapDet\d$/.test(h.id)) { h.click(0); return; } f().ctrl.flaps = clamp((ctl('flaps') | 0) + step(b), 0, 3); }, wheel: (d) => { f().ctrl.flaps = clamp((ctl('flaps') | 0) + Math.sign(d), 0, 3); }, tip: () => `WING FLAPS lever ${['UP', '10°', '20°', 'FULL 30°'][ctl('flaps') | 0]} (actual ${Math.round(f().flapPos)}°) — click = next notch down, right-click = up` });
     }
     // fuel shutoff (172S: red knob on the pedestal) — handled with the pedestal parts
     if (parts.fuelShutoff && !C172) { parts.fuelShutoff.visible = false; parts.fuelShutoff = null; }
@@ -765,7 +792,7 @@ export class Panel {
       needle(g, 0, 0, tachAng(f.eng.rpm), 66, 6); hub(g, 0, 0); glass(g, 0, 0, 88);
     });
     // CDIs
-    this.at(g, 'cdi1', () => this.drawCDI(g, av.nav1.obs, av.r1, true, !!E.com1 && av.com1.on !== false, 'n1'));
+    { const gpsSrc = this.R.gps != null && av.gps.src === 'GPS'; this.at(g, 'cdi1', () => this.drawCDI(g, av.nav1.obs, gpsSrc ? av.gpsR : av.r1, !gpsSrc, gpsSrc ? !!E.gps && av.gps.on : !!E.com1 && av.com1.on !== false, 'n1', gpsSrc)); }
     if (this.I.cdi2) this.at(g, 'cdi2', () => this.drawCDI(g, av.nav2.obs, av.r2, false, !!E.com2 && av.com2.on !== false, 'n2'));
     // ADF with rotatable card
     this.at(g, 'adf', () => {
@@ -816,7 +843,7 @@ export class Panel {
     glass(g, 0, 0, R);
   }
 
-  drawCDI(g, obs, r, gs, powered, key) {
+  drawCDI(g, obs, r, gs, powered, key, gpsSrc = false) {
     const R = 88;
     g.save(); g.rotate(-obs * DEG);
     for (let d = 0; d < 360; d += 5) { g.strokeStyle = '#ddd'; g.lineWidth = d % 10 ? 1 : 2; const r0 = d % 10 ? R - 7 : R - 12; g.beginPath(); g.moveTo(Math.sin(d * DEG) * r0, -Math.cos(d * DEG) * r0); g.lineTo(Math.sin(d * DEG) * (R - 1), -Math.cos(d * DEG) * (R - 1)); g.stroke(); }
@@ -824,7 +851,7 @@ export class Panel {
     g.restore();
     g.fillStyle = '#f2f2f2'; g.beginPath(); g.moveTo(0, -R + 28); g.lineTo(-6, -R + 36); g.lineTo(6, -R + 36); g.fill();
     const v = powered && r && r.valid;
-    if (!v) { g.fillStyle = '#d42'; g.fillRect(-46, -26, 26, 14); text(g, 'NAV', -33, -19, 10, '#fff', 'center', 700); }
+    if (!v) { g.fillStyle = '#d42'; g.fillRect(-46, -26, 26, 14); text(g, gpsSrc ? 'GPS' : 'NAV', -33, -19, 10, '#fff', 'center', 700); }
     else text(g, r.toFrom > 0 ? 'TO' : 'FR', 36, -16, 13, '#fff', 'center', 700);
     if (gs && !(powered && r && r.gsValid)) { g.fillStyle = '#d42'; g.fillRect(22, 18, 26, 14); text(g, 'GS', 35, 25, 10, '#fff', 'center', 700); }
     this[key] = this[key] || { d: 0, g: 0 };
@@ -835,6 +862,94 @@ export class Panel {
     if (gs) { const gt = powered && r && r.gsValid ? -r.gsDev : 0; this[key].g += (gt - this[key].g) * 0.12; g.fillRect(-56, 6 + this[key].g * 50 - 2.5, 116, 5); }
     g.restore();
     glass(g, 0, 0, R);
+  }
+
+  // ---------------------------------------------------------------- KLN 94 GPS screen
+  drawGPS(g, sim, f, av, E, t) {
+    const sx = this.stack.x, y = this.R.gps, G = av.gps, on = !!E.gps && G.on;
+    const X = sx + 42, Y = y + 4, W = 218, H = 66;
+    knob(g, sx + 22, y + 14, 8); knobPointer(g, sx + 22, y + 14, 8, G.on ? -120 + G.bright * 240 : -150);
+    pushBtn(g, sx + 6, y + 34, 32, 11, 'CRSR', this.isDown('gpsCrsrL'), { size: 6.5, dark: true });
+    knob(g, sx + 22, y + 71, 11); knobPointer(g, sx + 22, y + 71, 11, [2, 5, 10, 20, 40, 80].indexOf(G.range) * 50 - 125);
+    pushBtn(g, sx + 266, y + 13, 34, 13, 'CRSR', this.isDown('gpsCrsrR'), { size: 6.5, dark: true });
+    dualKnob(g, sx + 284, y + 58, 19, 10);
+    ['MSG', 'OBS', 'ALT', 'NRST', 'D→', 'CLR', 'ENT'].forEach((n, i) => pushBtn(g, sx + 44 + i * 31, y + 74, 28, 15, n, this.isDown('gps' + n), { size: 7, dark: true }));
+    g.fillStyle = '#020305'; roundRect(g, X, Y, W, H, 3); g.fill();
+    if (!on) return;
+    g.save(); roundRect(g, X, Y, W, H, 3); g.clip(); g.globalAlpha = 0.45 + 0.55 * G.bright;
+    const C = { cy: '#3fd8ff', gr: '#5dff7a', wh: '#f2f2f2', mg: '#ff4fe0', yl: '#ffd84a', am: '#ffb000' };
+    const T = (s, x, yy, sz = 9, c = C.wh, al = 'left', w = 700) => text(g, s, x, yy, sz, c, al, w, 'monospace');
+    const p3 = (v) => String(Math.round(((v % 360) + 360) % 360) || 360).padStart(3, '0');
+    const fmtT = (sec) => (sec == null ? '--:--' : `${Math.floor(sec / 3600)}:${String(Math.floor(sec / 60) % 60).padStart(2, '0')}`);
+    if (G.test > 0) {
+      T('KLN 94', X + W / 2, Y + 14, 12, C.cy, 'center'); T('SELF TEST IN PROGRESS', X + W / 2, Y + 32, 8, C.wh, 'center');
+      T('DATABASE: NORCAL  ' + new Date().getFullYear(), X + W / 2, Y + 44, 7.5, C.gr, 'center');
+      g.fillStyle = C.cy; g.fillRect(X + 30, Y + 54, (W - 60) * (1 - G.test / 3), 4); g.restore(); return;
+    }
+    const n = G.nav, page = G.page;
+    // status bar
+    g.fillStyle = '#0d2140'; g.fillRect(X, Y + H - 12, W, 12);
+    T(n ? n.scale : 'ENR', X + 4, Y + H - 6, 7.5, C.cy); T(G.mode, X + 36, Y + H - 6, 7.5, C.cy);
+    if (G.msgs.length) T('MSG', X + 64, Y + H - 6, 7.5, Math.floor(t * 2) % 2 || page === 'MSG' ? C.am : '#553300');
+    T(page === 'DTO' ? 'D→' : page, X + W - 4, Y + H - 6, 7.5, C.wh, 'right');
+    if (page === 'NAV') {
+      if (!n) { T('NO ACTV WPT', X + W / 2, Y + 16, 10, C.yl, 'center'); T('PRESS D→ OR NRST', X + W / 2, Y + 32, 8, C.wh, 'center'); T(`GS ${Math.round(G.gs || 0)}KT  TK ${G.trk == null ? '---' : p3(G.trk)}°`, X + W / 2, Y + 45, 8, C.gr, 'center'); }
+      else if (!G.navSub) {
+        T('→ ' + n.ident, X + 6, Y + 10, 11, C.mg);
+        T('DIS', X + 6, Y + 25, 7.5, C.cy); T(n.dist.toFixed(n.dist < 10 ? 1 : 0) + 'NM', X + 34, Y + 25, 10);
+        T('DTK', X + 6, Y + 38, 7.5, C.cy); T(p3(n.dtk) + '°', X + 34, Y + 38, 10);
+        T('GS', X + 6, Y + 50, 7.5, C.cy); T(Math.round(G.gs || 0) + 'KT', X + 34, Y + 50, 10);
+        T('TK', X + 110, Y + 38, 7.5, C.cy); T(G.trk == null ? '---' : p3(G.trk) + '°', X + 132, Y + 38, 10);
+        T('ETE', X + 110, Y + 50, 7.5, C.cy); T(fmtT(n.ete), X + 132, Y + 50, 10);
+        T(n.toFrom > 0 ? 'TO' : 'FR', X + 200, Y + 10, 8, C.wh, 'right');
+        // mini CDI: 5 dots each side, full scale = fs NM
+        const cx = X + 164, cy = Y + 21; g.fillStyle = C.wh; for (let i = -5; i <= 5; i++) { g.beginPath(); g.arc(cx + i * 8, cy, i ? 1.4 : 2.4, 0, 7); g.fill(); }
+        const d = clamp(-n.xtk / n.fs, -1, 1) * 40; g.fillStyle = C.mg; g.fillRect(cx + d - 1.5, cy - 5, 3, 10);
+        T(`XTK ${Math.abs(n.xtk).toFixed(2)}${n.xtk > 0 ? 'R' : 'L'}`, cx, cy + 9, 6.5, C.cy, 'center');
+        if (G.wptAlert && Math.floor(t * 3) % 2) T('WPT', X + 108, Y + 10, 8, C.am);
+      } else {
+        T('→ ' + n.ident, X + 6, Y + 10, 11, C.mg); T('BRG', X + 6, Y + 25, 7.5, C.cy); T(p3(n.brg) + '°', X + 34, Y + 25, 10);
+        T('XTK', X + 6, Y + 38, 7.5, C.cy); T(Math.abs(n.xtk).toFixed(2) + (n.xtk > 0 ? 'R' : 'L'), X + 34, Y + 38, 10);
+        T('POS', X + 110, Y + 25, 7.5, C.cy); T(`${(f.pos[0] / 1852).toFixed(1)}E ${(-f.pos[2] / 1852).toFixed(1)}N`, X + 132, Y + 25, 8);
+        T('ALT', X + 110, Y + 38, 7.5, C.cy); T(Math.round(f.pos[1] / 0.3048) + 'FT', X + 132, Y + 38, 9);
+      }
+    } else if (page === 'MAP') {
+      const cx = X + W / 2, cy = Y + 44, pxNM = 40 / G.range, up = G.trk ?? f.attitude.hdg, ua = up * DEG;
+      const toScr = (wx, wz) => { const ex = (wx - f.pos[0]) / 1852, nn = -(wz - f.pos[2]) / 1852; return [cx + (ex * Math.cos(ua) - nn * Math.sin(ua)) * pxNM, cy - (ex * Math.sin(ua) + nn * Math.cos(ua)) * pxNM]; };
+      g.strokeStyle = 'rgba(63,216,255,0.35)'; g.lineWidth = 1; g.beginPath(); g.arc(cx, cy, 40, Math.PI, 2 * Math.PI); g.stroke();
+      T(G.range + 'NM', X + W - 4, Y + 8, 7, C.cy, 'right'); T('TK ' + (G.trk == null ? '---' : p3(G.trk)), X + 4, Y + 8, 7, C.cy);
+      if (G.wpt) { const a = G.origin ? toScr(G.origin.x, G.origin.z) : [cx, cy], b = toScr(G.wpt.x, G.wpt.z); g.strokeStyle = C.mg; g.lineWidth = 2; g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke(); }
+      for (const w of G.list || []) {
+        if (w.dist > G.range * 1.6 || (G.declutter && w.type === 'VOR')) continue;
+        const [px, py] = toScr(w.x, w.z); const act = G.wpt && G.wpt.ident === w.ident;
+        g.strokeStyle = act ? C.mg : w.type === 'APT' ? C.cy : C.gr; g.lineWidth = 1.4; g.beginPath();
+        if (w.type === 'APT') g.arc(px, py, 3, 0, 7); else { g.moveTo(px - 3, py); g.lineTo(px, py - 3); g.lineTo(px + 3, py); g.lineTo(px, py + 3); g.closePath(); }
+        g.stroke(); T(w.ident, px + 5, py - 4, 6.5, act ? C.mg : C.wh);
+      }
+      g.fillStyle = C.wh; g.beginPath(); g.moveTo(cx, cy - 5); g.lineTo(cx - 4, cy + 4); g.lineTo(cx + 4, cy + 4); g.fill();
+    } else if (page === 'NRST') {
+      T('NEAREST APT', X + 6, Y + 8, 7.5, C.cy); T('BRG  DIS', X + W - 6, Y + 8, 7.5, C.cy, 'right');
+      const L = G.nrst || [], top = clamp(G.sel - 1, 0, Math.max(0, L.length - 3));
+      for (let i = 0; i < 3 && top + i < L.length; i++) {
+        const w = L[top + i], yy = Y + 20 + i * 12, selI = top + i === G.sel;
+        if (selI && G.cursor) { g.fillStyle = '#1d4f9a'; g.fillRect(X + 2, yy - 6, W - 4, 12); }
+        T(`${top + i + 1} ${w.ident}`, X + 6, yy, 8.5, selI ? C.wh : C.gr); T(`${p3(w.brg)}° ${w.dist.toFixed(1)}`, X + W - 6, yy, 8.5, C.wh, 'right');
+      }
+    } else if (page === 'ALT') {
+      T('ALTITUDE', X + 6, Y + 9, 7.5, C.cy); T('IND', X + 6, Y + 24, 7.5, C.cy); T(Math.round(f.ind.alt) + 'FT', X + 40, Y + 24, 10);
+      T('BARO', X + 6, Y + 38, 7.5, C.cy); T(G.baro.toFixed(2) + '"', X + 40, Y + 38, 10, G.cursor ? C.yl : C.wh);
+      T('GPS', X + 120, Y + 24, 7.5, C.cy); T(Math.round(f.pos[1] / 0.3048) + 'FT', X + 146, Y + 24, 10);
+      T('MSA', X + 120, Y + 38, 7.5, C.cy); T('4300FT', X + 146, Y + 38, 10);
+    } else if (page === 'DTO') {
+      const L = G.list || [], w = L[G.dtoSel];
+      T('DIRECT TO:', X + 6, Y + 9, 8, C.cy); if (w) { T(w.ident, X + W / 2, Y + 25, 15, C.mg, 'center'); T((w.name || '').toUpperCase().slice(0, 30), X + W / 2, Y + 40, 7, C.wh, 'center'); T(`${w.type}  ${p3(w.brg)}°  ${w.dist.toFixed(1)}NM`, X + W / 2, Y + 50, 7.5, C.gr, 'center'); }
+      T('ENT', X + W - 6, Y + 9, 7.5, Math.floor(t * 2) % 2 ? C.yl : C.wh, 'right');
+    } else if (page === 'MSG') {
+      T('MESSAGES', X + 6, Y + 8, 7.5, C.cy);
+      if (!G.msgs.length) T('NO MESSAGES', X + W / 2, Y + 28, 9, C.wh, 'center');
+      G.msgs.slice(-3).forEach((m, i) => T(m.slice(0, 34), X + 6, Y + 21 + i * 12, 7.5, C.yl));
+    }
+    g.restore();
   }
 
   // ---------------------------------------------------------------- radio displays & buttons
@@ -878,6 +993,7 @@ export class Panel {
       knob(g, sx + 178, y + 96, 11); knobPointer(g, sx + 178, y + 96, 11, -120 + (nv.vol ?? 0.8) * 240);
       dualKnob(g, sx + 264, y + 96, 21, 12); knobPointer(g, sx + 264, y + 96, 12, (nv.standby * 100 % 100) * 3.6);
     }
+    if (R.gps != null) this.drawGPS(g, sim, f, av, E, t);
     // KR 87
     {
       const y = R.adf, A = av.adf, on = !!E.adf && A.on !== false;
@@ -963,7 +1079,7 @@ proto.layout = function () {
   const breakers = (list, x0, y0, dx, perRow = 99, dy = 62) => list.forEach(([name, amps], i) => {
     const x = x0 + (i % perRow) * dx, y = y0 + Math.floor(i / perRow) * dy;
     C.push({
-      st: (g) => { engrave(g, name, x, y + 22, 8.5, '#e8e8e4'); },
+      st: (g) => { engrave(g, name, x, y + 22, 7.5, '#e8e8e4'); },
       dyn: (g, { f }) => breakerFace(g, x, y, amps, f.sys.cb?.[name] === false, self.isDown('cb' + name)),
       hot: (add, sim) => add(circ(x, y, 15), 'cb' + name, { click: () => { const s = sim.fdm.sys; s.cb = s.cb || {}; s.cb[name] = s.cb[name] === false; }, tip: () => `${name} circuit breaker (${amps} A) — ${sim.fdm.sys.cb?.[name] === false ? 'PULLED: click to reset' : 'IN: click to pull'}` }),
     });
@@ -1022,21 +1138,33 @@ proto.layout = function () {
     const sw = [['fuelPump', 'FUEL', 'PUMP'], ['beacon', 'BCN'], ['landing', 'LAND'], ['taxi', 'TAXI'], ['nav', 'NAV'], ['strobe', 'STROBE'], ['pitotHeat', 'PITOT', 'HEAT']];
     sw.forEach(([k, l, sub], i) => rocker(352 + i * 54, 846, k, l, { sub }));
     breakers(CB_172_MAIN, 342, 936, 46);
-    breakers(CB_172_AVN, 52, 702, 42, 5, 56);
-    C.push({ st: (g) => { engrave(g, 'AVIONICS', 132, 664, 10, '#eee', 'center', 700); engrave(g, 'PULL OFF', 132, 676, 7.5, '#cfcfca'); engrave(g, 'BREAKERS — PUSH TO RESET', 660, 1004, 9, '#cfcfca'); } });
+    breakers(CB_172_AVN, 48, 702, 52, 5, 56);
+    C.push({ st: (g) => { engrave(g, 'AVIONICS', 152, 664, 10, '#eee', 'center', 700); engrave(g, 'PULL OFF', 152, 676, 7.5, '#cfcfca'); engrave(g, 'BREAKERS — PUSH TO RESET', 660, 1004, 9, '#cfcfca'); } });
     // ---- below stack: dimmers, engine control placards, flap selector
-    this.dimmer(C, 1052, 640, 'panelDim', 'radioDim', 'PANEL', 'RADIO', circ);
-    this.dimmer(C, 1270, 640, 'gsDim', 'pedDim', 'GLARESHIELD', 'PEDESTAL', circ);
+    this.dimmer(C, 1052, 742, 'panelDim', 'radioDim', 'PANEL', 'RADIO', circ);
+    this.dimmer(C, 1270, 742, 'gsDim', 'pedDim', 'GLARESHIELD', 'PEDESTAL', circ);
     C.push({ st: (g) => {
-      engrave(g, 'THROTTLE', 1100, 712, 10, '#eee', 'center', 700); engrave(g, 'PUSH  OPEN', 1100, 812, 8.5, '#cfcfca');
-      engrave(g, 'MIXTURE', 1232, 712, 10, '#eee', 'center', 700); engrave(g, 'RICH', 1232, 812, 8.5, '#cfcfca'); engrave(g, 'PUSH LOCK BUTTON', 1232, 824, 7.5, '#cfcfca');
-      engrave(g, 'ALT STATIC AIR', 1166, 664, 8, '#eee', 'center', 700); engrave(g, 'PULL ON', 1166, 712, 7.5, '#cfcfca');
-      engrave(g, '12 VDC', 1166, 930, 8.5, '#eee'); g.fillStyle = '#060606'; g.beginPath(); g.arc(1166, 960, 13, 0, 7); g.fill(); g.strokeStyle = '#555'; g.lineWidth = 2; g.stroke();
+      engrave(g, 'THROTTLE', 1100, 828, 10, '#eee', 'center', 700); engrave(g, 'PUSH  OPEN', 1100, 920, 8.5, '#cfcfca');
+      engrave(g, 'MIXTURE', 1232, 828, 10, '#eee', 'center', 700); engrave(g, 'RICH', 1232, 920, 8.5, '#cfcfca'); engrave(g, 'PUSH LOCK BUTTON', 1232, 932, 7.5, '#cfcfca');
+      engrave(g, 'ALT STATIC AIR', 1166, 722, 8, '#eee', 'center', 700); engrave(g, 'PULL ON', 1166, 770, 7.5, '#cfcfca');
+      engrave(g, '12 VDC', 1166, 958, 8.5, '#eee'); g.fillStyle = '#060606'; g.beginPath(); g.arc(1166, 984, 12, 0, 7); g.fill(); g.strokeStyle = '#555'; g.lineWidth = 2; g.stroke();
       // cabin heat / air placards
       engrave(g, 'CABIN HT', 1720, 760, 10, '#eee', 'center', 700); engrave(g, 'PULL ON', 1720, 846, 8, '#cfcfca');
       engrave(g, 'CABIN AIR', 1850, 760, 10, '#eee', 'center', 700); engrave(g, 'PULL ON', 1850, 846, 8, '#cfcfca');
     } });
     this.flapPanel(C, 1384, 640, [640, 685, 730, 775]);
+    // NAV/GPS source switch-annunciator above CDI 1 (KLN 94 installation)
+    C.push({
+      st: (g) => { g.fillStyle = '#070707'; roundRect(g, 818, 20, 100, 44, 4); g.fill(); engrave(g, 'CDI 1 SOURCE', 868, 70, 7, '#cfcfca'); },
+      dyn: (g, { f, av, E }) => {
+        const pw = !!E.gps && f.elec, gps = av.gps.src === 'GPS', down = this.isDown('cdiSrc');
+        const lamp = (x, w, lab, lit, col) => { g.save(); g.fillStyle = lit ? col : '#151515'; if (lit) { g.shadowColor = col; g.shadowBlur = 8; } roundRect(g, x + (down ? 0.6 : 0), 24 + (down ? 0.8 : 0), w, 18, 2); g.fill(); g.restore(); text(g, lab, x + w / 2, 33, 9, lit ? '#061006' : '#555', 'center', 800); };
+        lamp(822, 44, 'NAV', pw && !gps, '#5dff7a'); lamp(870, 44, 'GPS', pw && gps, '#5dff7a');
+        const msg = pw && av.gps.ok && av.gps.msgs.length > 0, wpt = pw && av.gps.ok && av.gps.wptAlert;
+        g.save(); for (const [x, lab, lit] of [[822, 'MSG', msg], [870, 'WPT', wpt]]) { g.fillStyle = lit ? '#ffb000' : '#1a1408'; roundRect(g, x, 45, 44, 15, 2); g.fill(); text(g, lab, x + 22, 52.5, 8, lit ? '#1a0e00' : '#4a3a1a', 'center', 800); } g.restore();
+      },
+      hot: (add, sim) => add(rect(818, 20, 100, 44), 'cdiSrc', { click: () => { const G = sim.av.gps; G.src = G.src === 'GPS' ? 'NAV' : 'GPS'; }, tip: () => `NAV/GPS switch — CDI 1 and autopilot NAV follow ${sim.av.gps.src === 'GPS' ? 'the GPS' : 'NAV 1'} (click to swap)` }),
+    });
     this.hourMeter(C, 1440, 130);
     this.eltSwitch(C, 1440, 60);
     this.glovebox(C, 1640, 430, 370, 220, rect);

@@ -1,19 +1,19 @@
 // Skyhawk — main loop, cameras, input, UI.
 import * as THREE from 'three';
-import { FDM, KT, FT, C172, C152 } from './fdm.js?v=20261120c';
+import { FDM, KT, FT, C172, C152 } from './fdm.js?v=20261121a';
 import { qrot } from './math.js';
 import { groundQuery, heightAt, AIRPORTS, NAVAIDS, fromLocal, toLocal, WATER_LEVEL } from './geo.js';
 import { createTerrainMaterial, Terrain } from './terrain.js';
-import { buildAircraft, animateAircraft } from './aircraft.js?v=20261120c';
-import { Panel } from './panel.js?v=20261120c';
-import { Avionics, ILS } from './avionics.js';
+import { buildAircraft, animateAircraft } from './aircraft.js?v=20261121a';
+import { Panel } from './panel.js?v=20261121a';
+import { Avionics, ILS } from './avionics.js?v=20261121a';
 import { Environment } from './env.js';
 import { buildAirports, RockField, Forest, GrassField, buildTown } from './world.js';
 import { buildLife } from './life.js';
-import { MovingMap } from './map.js';
+import { MovingMap } from './map.js?v=20261121a';
 import { Sound } from './audio.js';
 import { setAniso } from './textures.js';
-import { ATC } from './atc.js?v=20261120c';
+import { ATC } from './atc.js?v=20261121a';
 import { initCesium, syncCesiumCamera, getCesiumElevationWorld, warmCesiumTerrain } from './cesium.js?v=20261120';
 
 const $ = (id) => document.getElementById(id);
@@ -619,6 +619,7 @@ function panelHit(x, y) {
   ray.setFromCamera({ x: (x / window.innerWidth) * 2 - 1, y: -(y / window.innerHeight) * 2 + 1 }, camera);
   // 3D controls (knobs, levers, key, trim wheel) take priority if they are nearer than the panel face
   const hits = ray.intersectObjects([p, ...(sim.panel.hot3d || [])], true);
+  sim.panelUV = null; for (const hit of hits) if (hit.object === p && hit.uv) { sim.panelUV = hit.uv; break; }
   for (const hit of hits) {
     if (hit.object === p) { if (!hit.uv) return null; const h = sim.panel.hit(hit.uv.x, hit.uv.y); if (h) return h; continue; }
     let o = hit.object; while (o && !o.userData.hot) o = o.parent;
@@ -981,7 +982,7 @@ function frame(dtReal) {
     const gust = sim.weather.turb * 0.25 * (Math.sin(simT * 0.7) * 0.5 + Math.sin(simT * 1.9 + 1) * 0.3 + Math.sin(simT * 0.23) * 0.2);
     F.env.gustFactor = gust;
     const E = F.eff || {}, av = sim.av;
-    const powered = { nav1: !!E.com1 && av.com1.on !== false, nav2: !!E.com2 && av.com2.on !== false, ap: !!E.ap, adf: !!E.adf };
+    const powered = { nav1: !!E.com1 && av.com1.on !== false, nav2: !!E.com2 && av.com2.on !== false, ap: !!E.ap, adf: !!E.adf, gps: !!E.gps };
     if (sim.panel) sim.panel.animate(dt);
     sim.apCmd = sim.av.update(F, dt * sim.simRate, powered);
     physics(dt);
