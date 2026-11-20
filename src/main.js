@@ -1,11 +1,11 @@
 // Skyhawk — main loop, cameras, input, UI.
 import * as THREE from 'three';
-import { FDM, KT, FT, C172, C152 } from './fdm.js?v=20261119';
+import { FDM, KT, FT, C172, C152 } from './fdm.js?v=20261120c';
 import { qrot } from './math.js';
 import { groundQuery, heightAt, AIRPORTS, NAVAIDS, fromLocal, toLocal, WATER_LEVEL } from './geo.js';
 import { createTerrainMaterial, Terrain } from './terrain.js';
-import { buildAircraft, animateAircraft } from './aircraft.js';
-import { Panel } from './panel.js';
+import { buildAircraft, animateAircraft } from './aircraft.js?v=20261120c';
+import { Panel } from './panel.js?v=20261120c';
 import { Avionics, ILS } from './avionics.js';
 import { Environment } from './env.js';
 import { buildAirports, RockField, Forest, GrassField, buildTown } from './world.js';
@@ -13,7 +13,7 @@ import { buildLife } from './life.js';
 import { MovingMap } from './map.js';
 import { Sound } from './audio.js';
 import { setAniso } from './textures.js';
-import { ATC } from './atc.js';
+import { ATC } from './atc.js?v=20261120c';
 import { initCesium, syncCesiumCamera, getCesiumElevationWorld, warmCesiumTerrain } from './cesium.js?v=20261120';
 
 const $ = (id) => document.getElementById(id);
@@ -159,11 +159,12 @@ async function init() {
   const aircraftType = readSetup().aircraftType;
   sim.fdm.setAircraft(aircraftType === 'C152' ? C152 : C172);
   progress(0.52, `Building the ${aircraftType === 'C152' ? 'Cessna 152' : 'Skyhawk'} — skin, rivets, fasteners, cabin…`);
-  sim.panel = new Panel();
+  sim.panel = new Panel(aircraftType);
   aircraft = await buildAircraft({ envMap: null, panelCanvas: sim.panel.canvas, reg: aircraftType === 'C152' ? 'N152AB' : 'N172SP', scheme: aircraftType === 'C152' ? 1 : 0, interior: true, lights: true, aircraftType });
   aircraft.traverse((o) => { if (o.isMesh) o.receiveShadow = true; });
   scene.add(aircraft);
   sim.panel.buildHotspots(sim);
+  sim.panel.attach(aircraft, sim);
   if (loadMode === 'light') {
     // spawn first, then build only the airports near the aircraft
     airports = new LocalAirports(scene, buildAircraft);
@@ -389,6 +390,7 @@ function applySetup(s, warmOnly = false) {
 
 // ---------------- input ----------------
 const look = { yaw: 0, pitch: -8, dragging: false, lx: 0, ly: 0, moved: 0 };
+sim.look = look;
 const orbit = { yaw: 200, pitch: 12, dist: 14 };
 const walker = { pos: null, yaw: 0, pitch: 0 }; sim.walker = walker;
 const mouse = { x: 0, y: 0, yoke: false, nx: 0, ny: 0 };
@@ -473,7 +475,7 @@ window.addEventListener('keydown', (e) => {
       if (sh) toggleFailurePanel();
       else if (!walkView()) { F.ctrl.flaps = Math.min(3, F.ctrl.flaps + 1); toast('Flaps ' + ['UP', '10°', '20°', 'FULL'][F.ctrl.flaps]); }
       break;
-    case 'KeyV': if (sh) { S.avionics = !S.avionics; toast('Avionics ' + (S.avionics ? 'ON' : 'OFF')); } else { F.ctrl.flaps = Math.max(0, F.ctrl.flaps - 1); toast('Flaps ' + ['UP', '10°', '20°', 'FULL'][F.ctrl.flaps]); } break;
+    case 'KeyV': if (sh) { S.avionics = !S.avionics; S.avionics2 = S.avionics; toast('Avionics ' + (S.avionics ? 'ON' : 'OFF')); } else { F.ctrl.flaps = Math.max(0, F.ctrl.flaps - 1); toast('Flaps ' + ['UP', '10°', '20°', 'FULL'][F.ctrl.flaps]); } break;
     case 'KeyP': F.ctrl.parkBrake = !F.ctrl.parkBrake; toast('Parking brake ' + (F.ctrl.parkBrake ? 'SET' : 'RELEASED')); break;
     case 'KeyJ':
       if (walkView()) break;
@@ -506,7 +508,7 @@ window.addEventListener('keydown', (e) => {
     case 'KeyO': if (sh) { S.nav = !S.nav; toast('Nav lights ' + (S.nav ? 'ON' : 'OFF')); } else { S.strobe = !S.strobe; toast('Strobes ' + (S.strobe ? 'ON' : 'OFF')); } break;
     case 'KeyK': F.kollsman = Math.round(sim.weather.qnhInHg * 100) / 100; toast('Altimeter ' + F.kollsman.toFixed(2)); break;
     case 'KeyD': if (!walkView()) { F.gyro.hiDrift = ((F.attitude.hdg - F.gyro.compass + 540) % 360) - 180; toast('Heading indicator set to compass'); } break;
-    case 'KeyA': if (!walkView() && !sh) { av.apButton('AP', F); toast(av.ap.on ? 'Autopilot ENGAGED (ROL/VS)' : 'Autopilot DISCONNECTED'); } else if (sh && !walkView()) { /* reserved */ } break;
+    case 'KeyA': if (!walkView() && !sh) { if (!F.eff?.ap) { toast(F.aircraft.carb ? 'The Cessna 152 has no autopilot' : 'Autopilot has no power (AVIONICS BUS 2 / AUTOPILOT breaker)'); break; } av.apButton('AP', F); toast(av.ap.on ? 'Autopilot ENGAGED (ROL/VS)' : 'Autopilot DISCONNECTED'); } else if (sh && !walkView()) { /* reserved */ } break;
     case 'KeyH': if (sh) { av.apButton('HDG', F); toast('AP ' + av.ap.lat); } break;
     case 'KeyN': if (sh) { av.apButton('NAV', F); toast('AP ' + av.ap.lat); } else { $('mini').classList.toggle('hidden'); } break;
     case 'KeyR':
@@ -551,9 +553,9 @@ const walkView = () => sim.view === 'cabin' || sim.view === 'walk';
 function autoStart() {
   const F = sim.fdm, S = F.sys;
   toast('Auto-start: Master ON, beacon ON, fuel BOTH, mixture RICH, throttle ¼", fuel pump prime, mags START…', 3500);
-  S.master = true; S.alternator = true; S.beacon = true; S.fuelSel = 'BOTH'; F.ctrl.mixture = 1; F.ctrl.throttle = 0.1; S.fuelPump = true; F.ctrl.parkBrake = true;
+  S.master = true; S.alternator = true; S.beacon = true; S.fuelSel = 'BOTH'; S.fuelShutoff = true; S.carbHeat = false; if (F.aircraft.carb && F.eng.oilT < 110) S.primer = 3; F.ctrl.mixture = 1; F.ctrl.throttle = 0.1; S.fuelPump = true; F.ctrl.parkBrake = true;
   setTimeout(() => { S.fuelPump = false; S.mags = 4; sim.startHeld = 4; }, 1200);
-  const chk = setInterval(() => { if (F.eng.running || sim.startHeld <= 0) { clearInterval(chk); S.mags = 3; sim.startHeld = 0; if (F.eng.running) { S.avionics = true; S.nav = true; F.ctrl.throttle = 0.13; toast('Engine running — avionics ON. Set altimeter (K), check oil pressure.', 3000); } } }, 100);
+  const chk = setInterval(() => { if (F.eng.running || sim.startHeld <= 0) { clearInterval(chk); S.mags = 3; sim.startHeld = 0; if (F.eng.running) { S.avionics = true; S.avionics2 = true; S.nav = true; F.ctrl.throttle = 0.13; toast('Engine running — avionics ON. Set altimeter (K), check oil pressure.', 3000); } } }, 100);
 }
 
 function setView(v) {
@@ -580,6 +582,10 @@ canvas.addEventListener('pointerdown', (e) => {
   canvas.focus?.();
   look.dragging = true; look.lx = e.clientX; look.ly = e.clientY; look.moved = 0; look.button = e.button;
   canvas.setPointerCapture?.(e.pointerId);
+  // press-and-hold controls (ignition START, annunciator TEST, ...)
+  look.hold = null;
+  const h = panelHit(e.clientX, e.clientY);
+  if (h && h.down) { h.down(e.button); look.hold = h; look.dragging = false; sim.sound.click(); sim.panelDirty = true; }
 });
 canvas.addEventListener('pointermove', (e) => {
   mouse.x = e.clientX; mouse.y = e.clientY;
@@ -595,6 +601,7 @@ canvas.addEventListener('pointermove', (e) => {
 });
 canvas.addEventListener('pointerup', (e) => {
   look.dragging = false;
+  if (look.hold) { look.hold.up?.(e.button); look.hold = null; sim.panelDirty = true; return; }
   if (look.moved < 4) panelClick(e.clientX, e.clientY, e.button);
 });
 canvas.addEventListener('wheel', (e) => {
@@ -610,9 +617,14 @@ function panelHit(x, y) {
   if (!(sim.view === 'cockpit' || sim.view === 'cabin') || !sim.panel) return null;
   const p = aircraft.userData.parts.panel; if (!p) return null;
   ray.setFromCamera({ x: (x / window.innerWidth) * 2 - 1, y: -(y / window.innerHeight) * 2 + 1 }, camera);
-  const hit = ray.intersectObject(p, false)[0];
-  if (!hit || !hit.uv) return null;
-  return sim.panel.hit(hit.uv.x, hit.uv.y);
+  // 3D controls (knobs, levers, key, trim wheel) take priority if they are nearer than the panel face
+  const hits = ray.intersectObjects([p, ...(sim.panel.hot3d || [])], true);
+  for (const hit of hits) {
+    if (hit.object === p) { if (!hit.uv) return null; const h = sim.panel.hit(hit.uv.x, hit.uv.y); if (h) return h; continue; }
+    let o = hit.object; while (o && !o.userData.hot) o = o.parent;
+    if (o && o.visible !== false) return o.userData.hot;
+  }
+  return null;
 }
 function panelClick(x, y, button) {
   const h = panelHit(x, y);
@@ -832,7 +844,7 @@ function updateTip() {
   const tip = $('tip');
   if (look.dragging) { tip.classList.add('hidden'); return; }
   const h = panelHit(mouse.x, mouse.y);
-  if (h && h.tip) { tip.textContent = h.tip; tip.style.left = mouse.x + 'px'; tip.style.top = mouse.y + 'px'; tip.classList.remove('hidden'); canvas.style.cursor = 'pointer'; }
+  if (h && h.tip) { tip.textContent = typeof h.tip === 'function' ? h.tip() : h.tip; tip.style.left = mouse.x + 'px'; tip.style.top = mouse.y + 'px'; tip.classList.remove('hidden'); canvas.style.cursor = 'pointer'; }
   else { tip.classList.add('hidden'); canvas.style.cursor = mouse.yoke ? 'crosshair' : 'default'; }
 }
 
@@ -968,7 +980,9 @@ function frame(dtReal) {
     // wind with gusts
     const gust = sim.weather.turb * 0.25 * (Math.sin(simT * 0.7) * 0.5 + Math.sin(simT * 1.9 + 1) * 0.3 + Math.sin(simT * 0.23) * 0.2);
     F.env.gustFactor = gust;
-    const powered = F.avionicsOn;
+    const E = F.eff || {}, av = sim.av;
+    const powered = { nav1: !!E.com1 && av.com1.on !== false, nav2: !!E.com2 && av.com2.on !== false, ap: !!E.ap, adf: !!E.adf };
+    if (sim.panel) sim.panel.animate(dt);
     sim.apCmd = sim.av.update(F, dt * sim.simRate, powered);
     physics(dt);
     sim.atc.update(sim, dt * sim.simRate);

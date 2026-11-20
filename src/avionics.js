@@ -30,12 +30,17 @@ export class Avionics {
   constructor() {
     this.nav1 = { active: 110.3, standby: 113.4, obs: 270 };
     this.nav2 = { active: 113.4, standby: 116.8, obs: 90 };
-    this.com1 = { active: 122.8, standby: 121.5 };
-    this.xpdr = { code: '1200', mode: 'ALT', ident: 0 };
+    this.com1 = { active: 122.8, standby: 121.5, on: true, vol: 0.8, sq: false };
+    this.com2 = { active: 121.9, standby: 118.0, on: true, vol: 0.8, sq: false };
+    this.nav1.on = this.nav2.on = true;
+    this.xpdr = { code: '1200', mode: 'ALT', ident: 0, entry: '', prev: '1200', entryT: 0 };
+    // KMA 26 audio panel: mic selector 1..4 (COM1, COM2, COM3, TEL) and receive selections
+    this.audio = { on: true, vol: 0.8, mic: 1, mkrSens: 'HI', rx: { COM1: true, COM2: false, COM3: false, NAV1: false, NAV2: false, DME: false, ADF: false, MKR: true, SPKR: true } };
+    this.aiBias = 0; this.adfCard = 0;
     this.hdgBug = 270;
     this.ap = { on: false, lat: 'ROL', vert: 'VS', vsSel: 0, altSel: 3000, gsArmed: false, locArmed: false, iBank: 0, iPitch: 0, trimTimer: 0 };
     this.r1 = {}; this.r2 = {};
-    this.adf = { freq: 344 };
+    this.adf = { freq: 344, standby: 362, on: true, vol: 0.7, mode: 'ADF', bfo: false, timer: 'FLT', flt: 0, et: 0 };
   }
 
   receive(rx, pos, altFt) {
@@ -80,12 +85,20 @@ export class Avionics {
     return out;
   }
 
+  // radio the pilot transmits on (audio panel MIC selector)
+  micRadio() { return this.audio.mic === 2 ? this.com2 : this.com1; }
+  // is COM n receiving/transmitting? (needs bus power, breaker and the radio's own power knob)
+  comPowered(f, n) { const E = f.eff || {}; const c = n === 2 ? this.com2 : this.com1; return !!(n === 2 ? E.com2 : E.com1) && c.on !== false && (E.audio === undefined || (E.audio && this.audio.on !== false)); }
+
   update(f, dt, powered) {
     const pos = f.pos;
     const altFt = pos[1] / 0.3048;
-    this.r1 = powered ? this.receive(this.nav1, pos, altFt) : { valid: false };
-    this.r2 = powered ? this.receive(this.nav2, pos, altFt) : { valid: false };
-    if (!powered && this.ap.on) this.disconnect(true);
+    const P = typeof powered === 'object' ? powered : { nav1: powered, nav2: powered, ap: powered, adf: powered };
+    this.r1 = P.nav1 ? this.receive(this.nav1, pos, altFt) : { valid: false };
+    this.r2 = P.nav2 ? this.receive(this.nav2, pos, altFt) : { valid: false };
+    if (!P.ap && this.ap.on) this.disconnect(true);
+    // KR 87 flight timer runs while powered; elapsed timer always counts up when powered
+    if (P.adf && this.adf.on !== false) { this.adf.flt += dt; this.adf.et += dt; }
     return this.autopilot(f, dt);
   }
 
@@ -110,11 +123,13 @@ export class Avionics {
     // --- lateral ---
     const hdgGyro = (att.hdg - f.gyro.hiDrift + 360) % 360;
     let bankCmd = 0;
-    const r = this.r1;
+    let r = this.r1;
     if (ap.lat === 'HDG') bankCmd = clamp(angDiff(this.hdgBug, hdgGyro) * 1.4, -20, 20);
-    else if (ap.lat === 'NAV' || ap.lat === 'APR') {
+    else if (ap.lat === 'NAV' || ap.lat === 'APR' || ap.lat === 'REV') {
       if (r.valid) {
-        const course = r.kind === 'ILS' ? r.course : this.nav1.obs;
+        const rev = ap.lat === 'REV';
+        const course = rev && r.kind === 'ILS' ? (r.course + 180) % 360 : r.kind === 'ILS' ? r.course : this.nav1.obs;
+        if (rev) r = { ...r, dev: -r.dev };
         const fs = r.kind === 'ILS' ? 1.0 : 1.0;
         const intercept = clamp(r.dev * 60 * fs, -45, 45);
         ap.iBank = clamp(ap.iBank + r.dev * dt * 2.0, -15, 15);
@@ -150,6 +165,7 @@ export class Avionics {
     if (name === 'HDG') ap.lat = ap.lat === 'HDG' ? 'ROL' : 'HDG';
     if (name === 'NAV') ap.lat = ap.lat === 'NAV' ? 'ROL' : 'NAV';
     if (name === 'APR') { ap.lat = ap.lat === 'APR' ? 'ROL' : 'APR'; ap.gsArmed = ap.lat === 'APR'; }
+    if (name === 'REV') { ap.lat = ap.lat === 'REV' ? 'ROL' : 'REV'; ap.gsArmed = false; }
     if (name === 'ALT') { if (ap.vert === 'ALT') { ap.vert = 'VS'; ap.vsSel = 0; } else { ap.vert = 'ALT'; ap.altHold = Math.round(f.ind.alt / 20) * 20; } }
     if (name === 'UP') { if (ap.vert === 'ALT') ap.altHold += 20; else ap.vsSel = Math.min(1600, ap.vsSel + 100); }
     if (name === 'DN') { if (ap.vert === 'ALT') ap.altHold -= 20; else ap.vsSel = Math.max(-1600, ap.vsSel - 100); }

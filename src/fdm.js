@@ -72,6 +72,7 @@ export const C152 = {
   fuelCapGal: 24,
   vne: 149, vno: 111, vfe10: 95, vfe: 85,
   visualScale: 0.92,
+  carb: true, // O-235 carburetted engine: primer + carb heat
 };
 
 export const AIRCRAFT_PROFILES = { C172, C152 };
@@ -191,6 +192,9 @@ export class FDM {
       fuelSel: 'BOTH', fuelL: 24, fuelR: 24, // gallons
       starter: false, cabinLights: false, panelLights: false,
       engineFailed: false, alternatorFailed: false, vacuumFailed: false,
+      // added cockpit controls
+      avionics2: running, fuelShutoff: true, carbHeat: false, primer: 0, primeT: 0, cabinHeat: 0, cabinAir: 0, altStatic: false,
+      cb: {}, panelDim: 0.6, radioDim: 0.8, gsDim: 0, pedDim: 0, annDim: false,
     };
     this.eng = {
       running, rpm: running ? (onGround ? 750 : 2350) : 0, map: 0, egt: running ? 1200 : 70, cht: running ? 300 : 70,
@@ -294,7 +298,7 @@ export class FDM {
     if (!e.running) map = lerp(pAmb, map, clamp(rpm / 600, 0, 1));
     e.map = lerp(e.map || pAmb, map, clamp(dt * 8, 0, 1));
     // fuel available?
-    const fuelAvail = (s.fuelSel === 'BOTH' ? s.fuelL + s.fuelR : s.fuelSel === 'LEFT' ? s.fuelL : s.fuelSel === 'RIGHT' ? s.fuelR : 0) > 0.05 && s.fuelSel !== 'OFF';
+    const fuelAvail = (s.fuelSel === 'BOTH' ? s.fuelL + s.fuelR : s.fuelSel === 'LEFT' ? s.fuelL : s.fuelSel === 'RIGHT' ? s.fuelR : 0) > 0.05 && s.fuelSel !== 'OFF' && s.fuelShutoff !== false;
     // fuel-air ratio from mixture lever (fuel injection meters fuel by rpm/throttle, density not compensated)
     const mix = clamp(c.mixture, 0, 1);
     const far = mix < 0.02 ? 0 : (0.032 + 0.062 * mix) / Math.pow(atm.sigma, 0.92);
@@ -312,15 +316,23 @@ export class FDM {
     const busOK = s.master && e.battery > 0.05;
     if (s.mags === 4 && busOK) { starterTq = 210 * clamp(1 - rpm / 320, 0, 1); e.ampsLoad += 120; e.battery -= dt * 0.0012; }
     if (!e.running && canRun && rpm > 140 && s.mags >= 1 && mix > 0.3) {
-      // primed injection start: catch probability per second
-      if (Math.random() < dt * 3.5) e.running = true;
+      // start catch rate depends on priming: carburetted 152 uses the plunger primer,
+      // the fuel-injected 172S is primed by running the fuel pump with mixture rich
+      let rate = 3.5;
+      const cold = e.oilT < 110;
+      if (this.aircraft.carb) { const p = s.primer || 0; if (cold) rate = p < 1 ? 0.25 : p > 6 ? 0.3 /* flooded */ : 3.0; }
+      else if (cold && (s.primeT || 0) < 1) rate = 0.8;
+      if (Math.random() < dt * rate) e.running = true;
     }
     if (e.running && (!canRun || rpm < 120 || s.engineFailed)) e.running = false;
     // indicated power: proportional to MAP and rpm (air mass flow)
+    if (!this.aircraft.carb && s.fuelPump && mix > 0.5 && fuelAvail && s.master) s.primeT = (s.primeT || 0) + dt;
+    if (e.running) { s.primer = 0; }
     let pInd = 0;
     if (e.running) {
       const mapEff = Math.max(0, e.map - 2.6) / (29.92 - 2.6);
       pInd = this.aircraft.engineHP * HP * 1.105 * mapEff * (rpm / this.aircraft.maxRPM) * eff * magOK * Math.sqrt(288.15 / atm.T);
+      if (s.carbHeat) pInd *= 0.94; // warm intake air: ~75 rpm drop
     }
     // friction & pumping losses
     const fric = (6.5 + 0.0045 * rpm + 0.0000026 * rpm * rpm) * HP * 0.5 * clamp(rpm / 120, 0, 1);
@@ -425,7 +437,7 @@ export class FDM {
     this.surf.rud = lerp(this.surf.rud, clamp(c.rud, -1, 1), clamp(rate, 0, 1));
     // electric flaps: ~ 3 deg/s, needs bus power
     const flapTarget = [0, 10, 20, 30][clamp(c.flaps | 0, 0, 3)];
-    if (s.master && e.battery > 0.02) {
+    if (s.master && e.battery > 0.02 && s.cb?.FLAP !== false) {
       const d = flapTarget - this.flapPos;
       this.flapPos += clamp(d, -3.2 * dt, 3.2 * dt);
       if (Math.abs(d) > 0.01) e.ampsLoad += 8;
@@ -719,10 +731,19 @@ export class FDM {
   updateSystems(dt, atm, qinf) {
     const s = this.sys, e = this.eng, gy = this.gyro;
     // electrical: 28V alternator when running and alt switch on; 24V battery
-    const altOn = s.master && s.alternator && !s.alternatorFailed && e.rpm > 900;
+    // circuit breakers: a pulled breaker (cb[name] === false) removes that load
+    const cb = (n) => s.cb?.[n] !== false;
+    const altOn = s.master && s.alternator && !s.alternatorFailed && e.rpm > 900 && cb('ALT FLD');
+    const two = !this.aircraft.carb; // 172S has two avionics buses
+    const bus1 = s.avionics && cb('AVN BUS 1'), bus2 = two ? s.avionics2 && cb('AVN BUS 2') : bus1;
+    const E = this.eff = {
+      beacon: s.beacon && cb('BCN'), nav: s.nav && cb('NAV LT'), strobe: s.strobe && cb('STROBE'), landing: s.landing && cb('LAND LT'), taxi: s.taxi && cb('TAXI LT'),
+      pitotHeat: s.pitotHeat && cb('PITOT HT'), fuelPump: s.fuelPump && cb('FUEL PUMP'), panelLights: s.panelLights && cb('INST LT'), cabinLights: s.cabinLights && cb('CABIN LT'),
+      tc: cb('TURN COORD'), bus1, bus2,
+    };
     let load = 0;
     if (s.master) {
-      load += 3; if (s.avionics) load += 6; if (s.beacon) load += 1.5; if (s.nav) load += 1.8; if (s.strobe) load += 2.5; if (s.landing) load += 8; if (s.taxi) load += 6; if (s.pitotHeat) load += 10; if (s.fuelPump) load += 4; if (s.panelLights) load += 1; if (s.cabinLights) load += 1;
+      load += 3; if (bus1) load += 4; if (two && bus2) load += 3; if (E.beacon) load += 1.5; if (E.nav) load += 1.8; if (E.strobe) load += 2.5; if (E.landing) load += 8; if (E.taxi) load += 6; if (E.pitotHeat) load += 10; if (E.fuelPump) load += 4; if (E.panelLights) load += 1; if (E.cabinLights) load += 1;
       load += e.ampsLoad;
     }
     this.eng.amps = altOn ? (e.battery < 0.98 ? 8 : 1.5) : -load;
@@ -730,12 +751,17 @@ export class FDM {
     if (altOn) e.battery = Math.min(1, e.battery + dt * 0.0006);
     e.busV = s.master ? (altOn ? 28.4 : 22.5 + 1.8 * e.battery - (e.ampsLoad > 50 ? 4 : 0)) : 0;
     this.elec = s.master && e.busV > 16;
-    this.avionicsOn = this.elec && s.avionics;
+    for (const k of ['beacon', 'nav', 'strobe', 'landing', 'taxi', 'pitotHeat', 'fuelPump', 'panelLights', 'cabinLights', 'tc']) E[k] = E[k] && this.elec;
+    // avionics: 172S bus 1 = NAV/COM 1, audio; bus 2 = NAV/COM 2, ADF, XPDR, autopilot (simplified)
+    const b1 = this.elec && bus1, b2 = this.elec && bus2;
+    E.audio = (b1 || b2) && cb('AUDIO'); E.com1 = b1 && cb('NAV/COM 1'); E.com2 = two && b2 && cb('NAV/COM 2');
+    E.adf = (two ? b2 : b1) && cb('ADF'); E.xpdr = (two ? b2 : b1) && cb('XPDR'); E.ap = two && b2 && cb('AUTOPILOT');
+    this.avionicsOn = b1 || b2;
     // gyros: AI & HI vacuum-driven, TC electric
     const vacOK = e.vac > 3.8;
     gy.aiSpin = lerp(gy.aiSpin, vacOK ? 1 : 0, dt * (vacOK ? 0.25 : 0.015));
     gy.hiSpin = lerp(gy.hiSpin, vacOK ? 1 : 0, dt * (vacOK ? 0.25 : 0.015));
-    gy.tcSpin = lerp(gy.tcSpin, this.elec ? 1 : 0, dt * (this.elec ? 0.4 : 0.03));
+    gy.tcSpin = lerp(gy.tcSpin, E.tc ? 1 : 0, dt * (E.tc ? 0.4 : 0.03));
     gy.hiDrift += dt * (0.18 / 60) * (gy.hiSpin > 0.5 ? 1 : 25) * (1 + Math.abs(this.omega[1]) * 2); // deg
     // magnetic compass with lag & swing
     const att = hprFromQ(this.q);
@@ -746,14 +772,15 @@ export class FDM {
     gy.compassRate += (dH * 2.2 - gy.compassRate * 1.4) * dt;
     gy.compass = (gy.compass + gy.compassRate * dt + 360) % 360;
     // pitot-static
-    const pitotOK = !(this.icing && !s.pitotHeat);
+    const pitotOK = !(this.icing && !E.pitotHeat);
     const iasRaw = pitotOK ? Math.sqrt(Math.max(0, 2 * qinf * Math.cos(this.alpha) ** 2 / 1.225)) / KT : this.ind.ias;
     // C172 ASI position error: reads low near stall
-    const iasPE = iasRaw < 60 ? iasRaw - (60 - iasRaw) * 0.12 : iasRaw;
+    let iasPE = iasRaw < 60 ? iasRaw - (60 - iasRaw) * 0.12 : iasRaw;
+    if (s.altStatic) iasPE *= 1.04; // alternate static (cabin) reads slightly high
     this.ind.ias = lerp(this.ind.ias, Math.max(0, iasPE), clamp(dt * 6, 0, 1));
     const pStatic = atm.p;
     const kollsmanPa = (this.kollsman ?? 29.92) * INHG;
-    const altInd = (1 - Math.pow(pStatic / kollsmanPa, 0.190263)) * 145366.45;
+    const altInd = (1 - Math.pow(pStatic / kollsmanPa, 0.190263)) * 145366.45 + (s.altStatic ? 35 : 0);
     this.ind.alt = lerp(this.ind.alt || altInd, altInd, clamp(dt * 8, 0, 1));
     const vsTrue = this.vel[1] / FT * 60;
     this.ind.vsi = lerp(this.ind.vsi, vsTrue, clamp(dt / 1.8, 0, 1));

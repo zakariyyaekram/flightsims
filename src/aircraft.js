@@ -774,24 +774,30 @@ async function buildInterior(root, parts, panelCanvas, envMap) {
   add(place(new THREE.BoxGeometry(0.75, 0.02, 0.85), { p: [-1.55, -0.35, 0] }), carpet);
 
   // ---- instrument panel ----
-  const panelW = 1.08, panelH = 0.43;
+  const panelW = 1.08, panelH = 0.54, panelY = 0.132; // canvas 2048x1024 (see panel.js PANEL_W/H)
   const panelTex = makePanelSurface(panelCanvas);
   const panelMat = new THREE.MeshStandardMaterial({ map: panelTex, roughness: 0.55, metalness: 0.05, emissive: 0xffffff, emissiveMap: panelTex, emissiveIntensity: 0.0 });
   const panelGeo = new THREE.PlaneGeometry(panelW, panelH);
   const panel = add(panelGeo, panelMat, 'panel');
-  panel.position.set(0.73, 0.185, 0);
+  panel.position.set(0.73, panelY, 0);
   panel.rotation.set(0, -Math.PI / 2, 0);
   panel.rotateX(-0.08);
   parts.panel = panel; parts.panelTex = panelTex; parts.panelMat = panelMat;
   panel.userData.size = [panelW, panelH];
   // panel bezel/back
-  add(place(new THREE.BoxGeometry(0.1, panelH + 0.04, panelW + 0.04), { p: [0.79, 0.185, 0] }), plastic);
+  add(place(new THREE.BoxGeometry(0.06, panelH + 0.04, panelW + 0.04), { p: [0.805, panelY, 0] }), plastic); // behind the tilted panel (top leans to x 0.752)
   // glareshield
-  const gs = new RoundedBoxGeometry(0.22, 0.05, 1.1, 3, 0.02);
-  add(place(gs, { p: [0.7, 0.425, 0] }), blackSoft, 'glareshield');
+  const gs = new RoundedBoxGeometry(0.17, 0.05, 1.1, 3, 0.02);
+  add(place(gs, { p: [0.72, 0.425, 0] }), blackSoft, 'glareshield');
   // lower panel/kneeboard area & center pedestal
-  add(place(new THREE.BoxGeometry(0.18, 0.16, 0.22), { p: [0.68, -0.12, 0.0] }), plastic, 'pedestal');
-  add(place(new THREE.BoxGeometry(0.08, 0.3, 1.08), { p: [0.77, -0.22, 0] }), plastic);
+  // centre pedestal below the panel (trim wheel, fuel shutoff) & lower firewall trim
+  add(place(new RoundedBoxGeometry(0.16, 0.38, 0.2, 2, 0.015), { p: [0.70, -0.33, 0.0] }), plastic, 'pedestal');
+  add(place(new THREE.BoxGeometry(0.08, 0.36, 1.08), { p: [0.79, -0.32, 0] }), plastic);
+  // fuel shutoff valve knob (red, push-pull) on the pedestal face
+  { const fsk = new THREE.Group(); fsk.position.set(0.612, -0.46, 0.0); root.add(fsk);
+    add(place(new THREE.CylinderGeometry(0.004, 0.004, 0.04, 10), { p: [0.02, 0, 0], r: [0, 0, Math.PI / 2] }), chrome, null, fsk);
+    add(place(new THREE.CylinderGeometry(0.016, 0.014, 0.018, 24), { p: [-0.004, 0, 0], r: [0, 0, Math.PI / 2] }), new THREE.MeshStandardMaterial({ color: 0xb3171a, roughness: 0.45 }), 'fuelShutoffKnob', fsk);
+    fsk.userData.baseX = 0.612; parts.fuelShutoff = fsk; }
 
   // magnetic compass on glareshield
   const cmp = new THREE.Group(); cmp.position.set(0.66, 0.5, 0); root.add(cmp);
@@ -827,15 +833,9 @@ async function buildInterior(root, parts, panelCanvas, envMap) {
     yoke.userData.wheel = wheel;
     parts[s < 0 ? 'yokeL' : 'yokeR'] = yoke;
   }
-  // ---- engine controls ----
-  const knob = (color, ribbed) => { const g = new THREE.CylinderGeometry(0.018, 0.018, 0.025, 20); const m = new THREE.MeshStandardMaterial({ color, roughness: ribbed ? 0.8 : 0.5 }); return [g, m]; };
-  const thr = new THREE.Group(); thr.position.set(0.66, 0.0, -0.02); root.add(thr);
-  { const [g, m] = knob(0x111111); add(place(g, { r: [0, 0, Math.PI / 2] }), m, 'throttleKnob', thr); add(place(new THREE.CylinderGeometry(0.005, 0.005, 0.12, 8), { p: [0.06, 0, 0], r: [0, 0, Math.PI / 2] }), chrome, null, thr); }
-  const mix = new THREE.Group(); mix.position.set(0.66, 0.0, 0.06); root.add(mix);
-  { const [g, m] = knob(0xb81d1d, true); add(place(g, { r: [0, 0, Math.PI / 2] }), m, 'mixtureKnob', mix); add(place(new THREE.CylinderGeometry(0.004, 0.004, 0.12, 8), { p: [0.06, 0, 0], r: [0, 0, Math.PI / 2] }), chrome, null, mix); }
-  parts.throttle = thr; parts.mixture = mix;
+  // engine controls (throttle, mixture, carb heat, ...) are built by Panel.attach() as panel-mounted 3D knobs
   // elevator trim wheel (pedestal) & indicator
-  const trimW = new THREE.Group(); trimW.position.set(0.62, -0.28, 0.0); root.add(trimW);
+  const trimW = new THREE.Group(); trimW.position.set(0.625, -0.27, 0.0); root.add(trimW);
   const tw = new THREE.CylinderGeometry(0.075, 0.075, 0.025, 32); tw.rotateX(Math.PI / 2);
   add(tw, blackSoft, 'trimWheel', trimW);
   for (let i = 0; i < 16; i++) { const a = (i / 16) * Math.PI * 2; add(place(new THREE.BoxGeometry(0.008, 0.012, 0.03), { p: [Math.cos(a) * 0.077, Math.sin(a) * 0.077, 0], r: [0, 0, a] }), plastic, null, trimW); }
@@ -937,14 +937,12 @@ export function animateAircraft(model, f, dt, t) {
     y.position.x = 0.48 - s.elev * 0.075;
     y.userData.wheel.rotation.x = s.ail * 0.8 * (1);
   }
-  if (p.throttle) p.throttle.position.x = 0.60 + c.throttle * 0.09;
-  if (p.mixture) p.mixture.position.x = 0.60 + c.mixture * 0.09;
   if (p.trimWheel) p.trimWheel.rotation.z = c.trim * 6;
   if (p.fuelSel) p.fuelSel.rotation.y = { BOTH: 0, LEFT: -Math.PI / 2, RIGHT: Math.PI / 2, OFF: Math.PI }[f.sys.fuelSel] || 0;
   for (const s1 of [-1, 1]) for (const pp of [-1, 1]) { const ped = p[`ped${s1}${pp}`]; if (ped) ped.position.x = 0.78 + pp * c.rud * 0.05; }
   if (p.compassCard) p.compassTex.offset.x = (f.gyro.compass / 360);
   // lights
-  const sys = f.sys, on = f.elec;
+  const sys = f.eff ? { ...f.sys, ...f.eff } : f.sys, on = f.elec;
   const night = model.userData.night || 0;
   if (p.navL) { p.navL.material.emissiveIntensity = on && sys.nav ? 3 : 0; p.navR.material.emissiveIntensity = on && sys.nav ? 3 : 0; }
   if (p.tailLight) p.tailLight.material.emissiveIntensity = on && sys.nav ? 3 : 0;
@@ -955,6 +953,6 @@ export function animateAircraft(model, f, dt, t) {
   if (p.landingSpot) { p.landingSpot.intensity = on && sys.landing ? 60 + night * 40 : 0; p.landingLens.material.emissiveIntensity = on && sys.landing ? 6 : 0; }
   if (p.taxiSpot) { p.taxiSpot.intensity = on && sys.taxi ? 40 + night * 20 : 0; p.taxiLens.material.emissiveIntensity = on && sys.taxi ? 5 : 0; }
   if (p.cabinLight) p.cabinLight.intensity = on && sys.cabinLights ? 0.6 : 0;
-  if (p.panelLight) p.panelLight.intensity = on && sys.panelLights ? 0.25 : 0;
-  if (p.panelMat) p.panelMat.emissiveIntensity = (1 - night) * 0.1 + (on && sys.panelLights ? 0.35 * night + 0.05 : 0.0);
+  if (p.panelLight) p.panelLight.intensity = on && sys.panelLights ? 0.06 + 0.3 * (sys.gsDim ?? 0.5) : 0;
+  if (p.panelMat) p.panelMat.emissiveIntensity = (1 - night) * 0.1 + (on && sys.panelLights ? (0.35 * night + 0.05) * (0.3 + 0.7 * (sys.panelDim ?? 1)) : 0.0);
 }

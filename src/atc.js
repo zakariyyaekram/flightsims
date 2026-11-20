@@ -114,7 +114,7 @@ export class ATC {
   }
 
   setFrequency(sim, frequency) {
-    sim.av.com1.active = frequency;
+    (sim.av.micRadio ? sim.av.micRadio() : sim.av.com1).active = frequency;
   }
 
   readback(text) {
@@ -128,9 +128,19 @@ export class ATC {
     }
     const station = STATIONS[this.airport.icao] || { ground: 121.9, tower: 118.0, approach: 125.35 };
     const runway = this.runway;
-    const active = Math.round(sim.av.com1.active * 100) / 100;
+    const n = sim.av.audio?.mic === 2 ? 2 : 1;
+    const radio = sim.av.micRadio ? sim.av.micRadio() : sim.av.com1;
+    if (sim.av.audio && sim.av.audio.mic > 2) {
+      this.setATC('The audio panel MIC selector is on COM 3 / TEL. Select COM 1 or COM 2 to transmit.', 'RADIO', this.options);
+      return;
+    }
+    if (sim.av.comPowered && sim.fdm.eff && !sim.av.comPowered(sim.fdm, n)) {
+      this.setATC(`COM ${n} has no power. Check MASTER, AVIONICS, the COM ${n} breaker and the radio's power knob.`, 'RADIO', this.options);
+      return;
+    }
+    const active = Math.round(radio.active * 100) / 100;
     if (action !== 'requestFollowing' && action !== 'requestMissedBrief' && Math.abs(active - this.frequency) > 0.001) {
-      this.setATC(`Tune COM 1 to ${this.frequency.toFixed(2)} MHz before transmitting on this frequency.`, 'RADIO',
+      this.setATC(`Tune COM ${n} to ${this.frequency.toFixed(2)} MHz before transmitting on this frequency.`, 'RADIO',
         this.options);
       return;
     }
