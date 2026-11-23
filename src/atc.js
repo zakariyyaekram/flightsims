@@ -65,17 +65,18 @@ export class ATC {
   }
 
   initFromSetup(setup) {
-    const SP = { SFO28: ['KSFO', '28L'], SFOramp: ['KSFO', '28L'], SFO1R: ['KSFO', '1R'], ILS28: ['KSFO', '28L'], OAK30: ['KOAK', '30'], OAK12: ['KOAK', '12'], OAK28R: ['KOAK', '28R'], SJC30: ['KSJC', '30L'], HWD28: ['KHWD', '28L'], SQL30: ['KSQL', '30'], PAO31: ['KPAO', '31'], LVK25: ['KLVK', '25R'], CCR32: ['KCCR', '32R'], RHV31: ['KRHV', '31R'], APC36: ['KAPC', '19R'], HAF30: ['KHAF', '30'], DVO31: ['KDVO', '31'], O69: ['KO69', '29'], GG: ['KSFO', '28L'], cruise: ['KOAK', '30'] };
+    const SP = { SFO28: ['KSFO', '28L'], SFO28rwy: ['KSFO', '28L'], SFOramp: ['KSFO', '28L'], SFO1R: ['KSFO', '1R'], ILS28: ['KSFO', '28L'], OAK30: ['KOAK', '30'], OAK12: ['KOAK', '12'], OAK28R: ['KOAK', '28R'], SJC30: ['KSJC', '30L'], HWD28: ['KHWD', '28L'], SQL30: ['KSQL', '30'], PAO31: ['KPAO', '31'], LVK25: ['KLVK', '25R'], CCR32: ['KCCR', '32R'], RHV31: ['KRHV', '31R'], APC36: ['KAPC', '19R'], HAF30: ['KHAF', '30'], DVO31: ['KDVO', '31'], O69: ['KO69', '29'], GG: ['KSFO', '28L'], cruise: ['KOAK', '30'] };
     const [airportCode, rwyCode] = SP[setup.spawn] || ['KSFO', '28L'];
     this.airport = AIRPORTS.find((a) => a.icao === airportCode) || this.airport;
     const station = { ground: this.airport.gndFreq || 121.9, tower: this.airport.twrFreq || 118.0, approach: 125.35, class: this.airport.tower ? 'Class D' : 'Class G', ...(STATIONS[this.airport.icao] || {}) };
-    this.runway = rwyCode || runwayName(this.airport, this.airport.hdg);
+    this.runway = setup.depRwy || rwyCode || runwayName(this.airport, this.airport.hdg);
+    this.taxiVia = setup.taxiVia || 'Alpha';
 
-    if (setup.spawn === 'SFOramp') {
+    if (setup.ramp || setup.spawn === 'SFOramp') {
       this.role = 'ground';
       this.frequency = station.ground;
       this.stage = 'ramp';
-      this.transmission = `${this.airport.icao} Ground, ${this.callsign}, North Ramp, requesting taxi for VFR departure.`;
+      this.transmission = `${this.airport.icao} Ground, ${this.callsign}, at the general aviation ramp with information Alpha, requesting taxi for VFR departure.`;
       this.speaker = 'YOU';
       this.options = [
         { label: 'Request taxi', action: 'requestTaxi' },
@@ -147,19 +148,19 @@ export class ATC {
 
     switch (action) {
       case 'requestTaxi':
-        this.readback(`${this.callsign}, North Ramp, taxi.`);
+        this.readback(`${this.callsign}, general aviation ramp, ready to taxi.`);
         this.role = 'ground'; this.frequency = station.ground; this.setFrequency(sim, station.ground);
         this.stage = 'taxi';
-        this.setATC(`${this.callsign}, ${this.airport.icao} Ground, taxi to runway ${runway} via Alpha, hold short of runway ${runway}.`, 'GROUND',
+        this.setATC(`${this.callsign}, ${this.airport.icao} Ground, taxi to runway ${runway} via ${this.taxiVia}, hold short of runway ${runway}.`, 'GROUND',
           [{ label: 'Read back taxi clearance', action: 'ackTaxi' }, { label: 'Request progressive taxi', action: 'progressiveTaxi' }]);
         break;
       case 'ackTaxi':
-        this.readback(`Taxi via Alpha, hold short runway ${runway}, ${this.callsign}.`);
+        this.readback(`Runway ${runway}, taxi via ${this.taxiVia}, hold short runway ${runway}, ${this.callsign}.`);
         this.setATC(`Readback correct. Contact Tower at ${station.tower.toFixed(2)} when ready.`, 'GROUND',
           [{ label: 'Contact Tower', action: 'contactTower' }]);
         break;
       case 'progressiveTaxi':
-        this.setATC(`${this.callsign}, continue taxi via Alpha, left on Taxiway Bravo, hold short of runway ${runway}.`, 'GROUND',
+        this.setATC(`${this.callsign}, progressive taxi: follow the magenta taxi line (T) via ${this.taxiVia}, hold short of runway ${runway}.`, 'GROUND',
           [{ label: 'Read back progressive taxi', action: 'ackTaxi' }]);
         break;
       case 'contactTower':
