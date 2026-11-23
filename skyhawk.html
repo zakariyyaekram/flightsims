@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.123/Build/Cesium/Widgets/widgets.css" />
-<link rel="stylesheet" href="./src/style.css" />
+<link rel="stylesheet" href="./src/style.css?v=20261123d" />
 <script src="https://cesium.com/downloads/cesiumjs/releases/1.123/Build/Cesium/Cesium.js"></script>
 <script type="importmap">
 { "imports": {
@@ -28,6 +28,7 @@
   <div id="topbar">
     <span id="viewName">COCKPIT</span>
     <span id="simRate" class="chip">1×</span>
+    <button id="gsChip" class="chip" type="button" title="Ground services (J)">GROUND SVC</button>
     <button id="failureChip" class="chip failureChip hidden" type="button">FAILURE: NONE</button>
     <span id="apChip" class="chip hidden">AP</span>
     <span id="brakeChip" class="chip warn hidden">PARK BRAKE</span>
@@ -130,8 +131,8 @@
         <dt>F / V</dt><dd>Flaps down / up one notch</dd>
         <dt>B (hold)</dt><dd>Toe brakes · <kbd>,</kbd> <kbd>.</kbd> left / right</dd>
         <dt>P</dt><dd>Parking brake</dd>
-        <dt>R</dt><dd>Request ground refueling while stopped at an airport</dd>
-        <dt>J / Shift+J</dt><dd>Connect / disconnect ground services</dd>
+        <dt>R</dt><dd>Call the fuel truck (ramp only, engine off, parking brake set)</dd>
+        <dt>J / Shift+J</dt><dd>Open the ground services panel (fuel, power, passengers, baggage, catering, pushback) / cancel all</dd>
         <dt>Y</dt><dd>Mouse-yoke mode on/off</dd>
         <dt>Gamepad</dt><dd>L-stick yoke, R-stick X rudder / Y throttle, LB/RB flaps, A brakes</dd>
       </dl></section>
@@ -291,7 +292,7 @@ window.startEdition = function (mode) {
     window.chooseLoadMode(mode);
     return;
   }
-  import('./src/main.js?v=20261123c').then(() => {
+  import('./src/main.js?v=20261123d').then(() => {
     if (typeof window.chooseLoadMode === 'function') window.chooseLoadMode(mode);
     else if (text) text.textContent = 'Failed to load the flight simulator.';
   }).catch((error) => {

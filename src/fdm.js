@@ -196,7 +196,7 @@ export class FDM {
       engineFailed: false, alternatorFailed: false, vacuumFailed: false,
       // added cockpit controls
       avionics2: running, fuelShutoff: true, carbHeat: false, primer: 0, primeT: 0, cabinHeat: 0, cabinAir: 0, altStatic: false,
-      cb: {}, panelDim: 0.6, radioDim: 0.8, gsDim: 0, pedDim: 0, annDim: false,
+      extPower: false, cb: {}, panelDim: 0.6, radioDim: 0.8, gsDim: 0, pedDim: 0, annDim: false,
     };
     this.eng = {
       running, rpm: running ? (onGround ? 750 : 2350) : 0, map: 0, egt: running ? 1200 : 70, cht: running ? 300 : 70,
@@ -320,7 +320,7 @@ export class FDM {
     const canCatch = fuelAvail && magOK > 0 && !s.engineFailed && (mix > 0.3 ? eff > 0.15 : primed);
     // starter
     let starterTq = 0;
-    const busOK = s.master && e.battery > 0.05;
+    const busOK = s.master && (e.battery > 0.05 || s.extPower);
     if (s.mags === 4 && busOK) { starterTq = 210 * clamp(1 - rpm / 320, 0, 1); e.ampsLoad += 120; e.battery -= dt * 0.0012; }
     if (!e.running && canCatch && rpm > 140 && s.mags >= 1) {
       // start catch rate depends on priming: carburetted 152 uses the plunger primer,
@@ -762,9 +762,10 @@ export class FDM {
       load += e.ampsLoad;
     }
     this.eng.amps = altOn ? (e.battery < 0.98 ? 8 : 1.5) : -load;
-    if (s.master && !altOn) e.battery = Math.max(0, e.battery - load * dt / (24 * 3600));
-    if (altOn) e.battery = Math.min(1, e.battery + dt * 0.0006);
-    e.busV = s.master ? (altOn ? 28.4 : 22.5 + 1.8 * e.battery - (e.ampsLoad > 50 ? 4 : 0)) : 0;
+    if (s.extPower && !altOn) this.eng.amps = e.battery < 0.98 ? 10 : 1;
+    if (s.master && !altOn && !s.extPower) e.battery = Math.max(0, e.battery - load * dt / (24 * 3600));
+    if (altOn || s.extPower) e.battery = Math.min(1, e.battery + dt * 0.0006);
+    e.busV = s.master ? (altOn ? 28.4 : s.extPower ? 28.0 : 22.5 + 1.8 * e.battery - (e.ampsLoad > 50 ? 4 : 0)) : 0;
     this.elec = s.master && e.busV > 16;
     for (const k of ['beacon', 'nav', 'strobe', 'landing', 'taxi', 'pitotHeat', 'fuelPump', 'panelLights', 'cabinLights', 'tc']) E[k] = E[k] && this.elec;
     // avionics: 172S bus 1 = NAV/COM 1, audio; bus 2 = NAV/COM 2, ADF, XPDR, autopilot (simplified)
