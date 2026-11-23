@@ -650,6 +650,18 @@ function handCartProto() {
   for (let i = 0; i < 3; i++) mb.add(new THREE.BoxGeometry(1, 1, 1), m.paint(cols[i], { rough: 0.5, clear: 0.2 }), [-0.2 + i * 0.3, 0.48 + (i === 2 ? 0.2 : 0), 0], [0, 0, 0], [0.26, 0.34 + r() * 0.1, 0.5]);
   const g = mb.build(); g.userData = { kind: 'handcart', len: 1.1, wid: 0.65 }; return g;
 }
+// GA hand tow bar (Cessna-style): forked clamp on the nose-wheel axle, steel tube, T-handle with rubber grips.
+// Local +X runs from the axle (origin) to the handle at x = len.
+function towbarProto() {
+  const m = mats(), mb = new MB(); const len = 1.25; const red = m.paint(0xb3171c, { rough: 0.42, clear: 0.35 });
+  for (const s of [-1, 1]) { mb.add(rbox(0.2, 0.05, 0.016, 0.006), m.brushed, [0.07, 0, s * 0.085]); mb.add(cylZ(0.014, 0.05, 10), m.chrome, [0, 0, s * 0.1]); }
+  mb.add(rbox(0.06, 0.05, 0.19, 0.01), m.brushed, [0.18, 0, 0]);
+  mb.add(cylX(0.017, len - 0.2, 12), red, [0.2 + (len - 0.2) / 2, 0, 0]);
+  mb.add(cylX(0.021, 0.08, 12), m.chassis, [0.24, 0, 0]);
+  mb.add(cylZ(0.016, 0.46, 12), red, [len, 0, 0]);
+  for (const s of [-1, 1]) mb.add(cylZ(0.021, 0.13, 12), m.plastic, [len, 0, s * 0.165]);
+  const g = mb.build(); g.userData = { kind: 'towbar', len }; return g;
+}
 function coolerProto() { const m = mats(), mb = new MB(); mb.add(rbox(0.55, 0.38, 0.36, 0.04), m.paint(0x1f5fa8), [0, 0, 0]); mb.add(rbox(0.57, 0.06, 0.38, 0.02), m.paint(0xf2f2f2), [0, 0.2, 0]); return mb.build(); }
 function rollerBagProto(col) { const m = mats(), mb = new MB(); mb.add(rbox(0.36, 0.55, 0.22, 0.04), m.paint(col, { rough: 0.45, clear: 0.3 }), [0, 0.36, 0]); mb.add(cylY(0.01, 0.4, 6), m.chrome, [0, 0.83, 0.07]); mb.add(cylY(0.01, 0.4, 6), m.chrome, [0, 0.83, -0.07]); mb.add(box(0.02, 0.03, 0.17), m.plastic, [0, 1.03, 0]); for (const s of [-1, 1]) mb.add(cylZ(0.03, 0.03, 8), m.plastic, [-0.12, 0.04, s * 0.09]); return mb.build(); }
 
@@ -658,7 +670,7 @@ export const GSE = {
   van: () => proto('van', () => vanProto()), tug: () => proto('tug', tugProto), gatug: () => proto('gatug', gaTugProto), bus: () => proto('bus', busProto),
   belt: () => proto('belt', beltLoaderProto), bagtractor: () => proto('bagtractor', baggageTractorProto), cart: (s = 1) => proto('cart' + (s % 3), () => baggageCartProto(s % 3 + 1)),
   gpu: () => proto('gpu', gpuProto), gagpu: () => proto('gagpu', gaGpuProto), ladder: () => proto('ladder', ladderProto), handcart: () => proto('handcart', handCartProto),
-  cooler: () => proto('cooler', coolerProto), rollerBag: (c = 0x2b3a55) => proto('bag' + c, () => rollerBagProto(c)),
+  cooler: () => proto('cooler', coolerProto), towbar: () => proto('towbar', towbarProto), rollerBag: (c = 0x2b3a55) => proto('bag' + c, () => rollerBagProto(c)),
   stairs: (h) => { const k = Math.round(h * 4) / 4; return proto('stairs' + k, () => stairsProto(k)); },
   cones(list) { const mb = new MB(); for (const [x, z] of list) coneGeo(mb, x, z); return mb.build(); },
 };

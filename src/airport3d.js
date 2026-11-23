@@ -1,7 +1,7 @@
 // Real airports: every runway with FAA-pattern markings and lighting, OSM taxiways / aprons / buildings,
 // control towers at their real positions and heights, windsocks, parked airliners at terminal gates and GA aircraft on ramps.
 import * as THREE from 'three';
-import { heightAt, AIRPORTS, toLocal, fromLocal, pointInPoly } from './geo.js';
+import { heightAt, AIRPORTS, toLocal, fromLocal, pointInPoly, gateSpots } from './geo.js';
 import { mulberry } from './noise.js';
 import { lightMaterial, makePoints, pbr, flattenStatic, pavementMaterial, canvasTex } from './world.js';
 import { airlinerGeometry, airlinerMaterials, airlinerRest } from './airliner.js';
@@ -298,30 +298,12 @@ const GATE_MIX = {
   KOAK: [['SWA', 'B738'], ['SWA', 'B39M'], ['SWA', 'B738'], ['ASA', 'B39M'], ['DAL', 'A320'], ['HAL', 'A321'], ['FDX', 'B77W']],
   KSJC: [['SWA', 'B738'], ['ASA', 'B39M'], ['SWA', 'B39M'], ['DAL', 'A321'], ['AAL', 'A321'], ['UAL', 'A320'], ['SKW', 'E175']],
 };
-function gateSpots(a, max) {
-  const spots = []; const terms = a.buildings.filter((b) => b.k === 'terminal');
-  const onApron = (x, z) => a.aprons.some((ap) => pointInPoly(x, z, ap.p));
-  const nearTaxi = (x, z, d) => a.taxiways.some((t) => !t.lane && t.p.some((q, i) => i && segD(x, z, t.p[i - 1], q) < d));
-  for (const b of terms) {
-    const p = b.p; let acc = 0;
-    for (let i = 0; i < p.length - 1 && spots.length < max; i++) {
-      const A = p[i], B = p[i + 1], L = Math.hypot(B[0] - A[0], B[1] - A[1]); if (L < 30) { acc += L; continue; }
-      const dx = (B[0] - A[0]) / L, dz = (B[1] - A[1]) / L;
-      for (let s = 20; s < L - 15 && spots.length < max; s += 52) {
-        const x0 = A[0] + dx * s, z0 = A[1] + dz * s;
-        for (const sg of [1, -1]) {
-          const nx = dz * sg, nz = -dx * sg; // try both sides
-          if (pointInPoly(x0 + nx * 4, z0 + nz * 4, p)) continue; // inside the building
-          const cx = x0 + nx * 28, cz = z0 + nz * 28;
-          if (!onApron(cx, cz) || !onApron(x0 + nx * 48, z0 + nz * 48) || nearTaxi(cx, cz, 30)) continue;
-          if (spots.some((q) => Math.hypot(q.x - cx, q.z - cz) < 44)) continue;
-          if (terms.some((tb) => pointInPoly(cx, cz, tb.p) || pointInPoly(x0 + nx * 50, z0 + nz * 50, tb.p))) continue;
-          spots.push({ x: cx, z: cz, wx: x0, wz: z0, nx, nz }); break;
-        }
-      }
-    }
-  }
-  return spots;
+// every other field: regional jets, plus narrow-bodies where the runway is long enough
+function gateMix(a) {
+  if (GATE_MIX[a.icao]) return GATE_MIX[a.icao];
+  const len = a.runways[0].len;
+  if (len >= 1500) return [['SKW', 'E175'], ['SWA', 'B738'], ['ASA', 'E175'], ['UAL', 'A320'], ['SWA', 'B738'], ['DAL', 'E175'], ['ASA', 'B39M']];
+  return [['SKW', 'E175'], ['ASA', 'E175'], ['UAL', 'E175'], ['DAL', 'E175']];
 }
 function segD(x, z, a, b) { const dx = b[0] - a[0], dz = b[1] - a[1], L2 = dx * dx + dz * dz || 1; let t = ((x - a[0]) * dx + (z - a[1]) * dz) / L2; t = Math.max(0, Math.min(1, t)); return Math.hypot(a[0] + dx * t - x, a[1] + dz * t - z); }
 
@@ -391,7 +373,7 @@ export async function buildAirports(scene, envMap, buildAircraftFn, elevationPro
         }
       }
     });
-    for (const ap of a.aprons) { const g = polyGeometry(ap.p, ap.h, 0.06, gh); if (g) ag.push(g); }
+    for (const ap of a.aprons) { const g = polyGeometry(ap.p, ap.h, ap.synth ? 0.072 : 0.06, gh); if (g) ag.push(g); }
     const mergeAdd = (list, mat) => {
       if (!list.length) return; const lst = list.map((g) => (g.index ? g.toNonIndexed() : g));
       for (const g of lst) for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', 'uvm'].includes(k)) g.deleteAttribute(k);
@@ -486,19 +468,20 @@ export async function buildAirports(scene, envMap, buildAircraftFn, elevationPro
       }
     }
     // ---- parked aircraft ----
-    if (GATE_MIX[a.icao]) {
-      const spots = gateSpots(a, a.icao === 'KSFO' ? 46 : 22); const mix = GATE_MIX[a.icao]; const rnd = mulberry(a.icao.charCodeAt(1) * 99);
+    {
+      const major = !!GATE_MIX[a.icao]; const mix = gateMix(a);
+      const spots = gateSpots(a, a.icao === 'KSFO' ? 46 : major ? 22 : 6); const rnd = mulberry(a.icao.charCodeAt(1) * 99 + (major ? 0 : a.icao.charCodeAt(2) * 7));
       const byKey = new Map(); const stands = [];
       spots.forEach((s, i) => {
-        if (rnd() < 0.22) return; // some gates empty
+        if (rnd() < (major ? 0.22 : 0.08)) return; // some gates empty
         let [lv, ty] = mix[Math.floor(rnd() * mix.length)];
         const G = airlinerGeometry(ty); if (G.T.L / 2 + 6 > 40 && rnd() < 0.5) [lv, ty] = mix[0];
         // nose ~7 m from the terminal wall
         const G2 = airlinerGeometry(ty); const L = G2.T.L; const cx = s.wx + s.nx * (L / 2 + 7), cz = s.wz + s.nz * (L / 2 + 7);
-        stands.push({ ...s, cx, cz, ty, lv, G: G2, label: (a.icao === 'KSFO' ? 'BCDEFG'[Math.floor(i / 8) % 6] : a.icao === 'KOAK' ? 'AB'[i % 2] : 'AB'[Math.floor(i / 11) % 2]) + (1 + (i % (a.icao === 'KSFO' ? 8 : 11)) + (a.icao === 'KOAK' ? Math.floor(i / 2) : 0)) });
+        stands.push({ ...s, cx, cz, ty, lv, G: G2, label: !major ? 'A' + (i + 1) : (a.icao === 'KSFO' ? 'BCDEFG'[Math.floor(i / 8) % 6] : a.icao === 'KOAK' ? 'AB'[i % 2] : 'AB'[Math.floor(i / 11) % 2]) + (1 + (i % (a.icao === 'KSFO' ? 8 : 11)) + (a.icao === 'KOAK' ? Math.floor(i / 2) : 0)) });
       });
       // jet bridges docked to the L1 door, turnaround equipment and animated pushbacks
-      gateFx.push(buildGateServices(a, stands, { group, gh, rnd, major: true })); a._gateStands = stands;
+      if (stands.length) gateFx.push(buildGateServices(a, stands, { group, gh, rnd, major })); a._gateStands = stands;
       for (const st of stands) {
         if (st.mode === 'push') continue; // animated aircraft built by the gate services
         const key = st.lv + st.ty; if (!byKey.has(key)) byKey.set(key, { lv: st.lv, ty: st.ty, m: [] });

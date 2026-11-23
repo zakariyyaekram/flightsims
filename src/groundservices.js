@@ -52,7 +52,7 @@ class Actor {
       o.position.set(x, this.gh(x, z) + this.yOff, z);
       if (p.s >= p.L - 1e-3) { this.path = null; this.v = 0; }
     } else o.position.y = this.gh(o.position.x, o.position.z) + this.yOff;
-    if (this.person) posePerson(o, dt, this.path ? this.v : 0, { carry: this.carry, work: this.work });
+    if (this.person) posePerson(o, dt, this.path ? this.v : (this.walkV || 0), { carry: this.carry, work: this.work });
   }
 }
 
@@ -76,7 +76,7 @@ export class PlayerGroundServices {
     this.sim = sim; this.toast = toast; this.gh = (x, z) => groundH(x, z) + 0.06;
     this.root = new THREE.Group(); this.root.name = 'groundServices'; scene.add(this.root);
     this.jobs = new Map(); this.pax = 0; this.bags = 0; this.panelT = 0; this.open = false;
-    this.opts = { fuel: 'full', pax: 1, push: 'straight' };
+    this.opts = { fuel: 'full', pax: 1, push: 'straight', tow: 'tug' };
     this.buildPanel();
   }
   reset() {
@@ -129,7 +129,7 @@ export class PlayerGroundServices {
       { id: 'deboard', icon: 'deboard', name: 'Deboard passengers', desc: 'Passengers are escorted back to the FBO.', why: need(...base, off, brake, [this.pax > 0, 'No passengers on board'], [!busy(['board', 'push']), 'Another service is using the doors']) },
       { id: 'bags', icon: 'bags', name: 'Load baggage', desc: `Baggage compartment behind the rear seats (max 120 lb). ${this.bags} item${this.bags === 1 ? '' : 's'} loaded.`, why: need(...base, off, brake, [this.bags < 3, 'Baggage area is full'], [!this.jobs.has('push'), 'Wait for the tow to finish']) },
       { id: 'catering', icon: 'catering', name: 'Catering · FBO van', desc: 'Snacks, water and coffee delivered to the cabin door.', why: need(...base, off, brake, [!this.jobs.has('push'), 'Wait for the tow to finish']) },
-      { id: 'push', icon: 'tug', name: 'Tow / pushback · GA tug', desc: 'A tug cradles the nose wheel and pushes you clear of the parking spot. Release the brake when it is connected.', why: need(...base, off, [!['fuel', 'board', 'deboard', 'bags', 'catering'].some((i) => this.jobs.has(i)), 'Finish the other services first'], [!S.extPower && !this.jobs.has('gpu'), 'Disconnect ground power first']), opt: 'push' },
+      { id: 'push', icon: 'tug', name: 'Tow / pushback · tug or tow bar', desc: 'Choose a TowMaster tug that cradles the nose wheel, or a line tech with a hand tow bar (slower, tighter turns). Release the brake when connected.', why: need(...base, off, [!['fuel', 'board', 'deboard', 'bags', 'catering'].some((i) => this.jobs.has(i)), 'Finish the other services first'], [!S.extPower && !this.jobs.has('gpu'), 'Disconnect ground power first']), opt: 'push' },
       { id: 'bridge', icon: 'bridge', name: 'Jet bridge', na: `Not available — the ${name} has no airliner door; jet bridges dock to airliners at terminal gates.` },
       { id: 'stairs', icon: 'stairs', name: 'Passenger air stairs', na: `Not needed — the ${name} cabin door is at ground level.` },
       { id: 'bus', icon: 'bus', name: 'Apron bus', na: 'Airliners only — buses carry passengers to remote stands.' },
@@ -162,7 +162,11 @@ export class PlayerGroundServices {
     const opt = (o) => {
       if (o === 'fuel') { const cap = F.aircraft.fuelCapGal, tabs = (F.aircraft.visualScale ?? 1) < 1 ? 13 : 17.5; return `<select data-opt="fuel" aria-label="Fuel amount"><option value="full"${this.opts.fuel === 'full' ? ' selected' : ''}>Top off (${(cap * 2).toFixed(0)} gal)</option><option value="tabs"${this.opts.fuel === 'tabs' ? ' selected' : ''}>To the tabs (${(tabs * 2).toFixed(0)} gal)</option><option value="plus10"${this.opts.fuel === 'plus10' ? ' selected' : ''}>+10 gal</option></select>`; }
       if (o === 'pax') { const seats = (F.aircraft.visualScale ?? 1) < 1 ? 1 : 3; let s = '<select data-opt="pax" aria-label="Passengers">'; for (let i = 1; i <= Math.max(1, seats - this.pax); i++) s += `<option value="${i}"${+this.opts.pax === i ? ' selected' : ''}>${i} passenger${i > 1 ? 's' : ''}</option>`; return s + '</select>'; }
-      if (o === 'push') return `<select data-opt="push" aria-label="Pushback direction"><option value="straight"${this.opts.push === 'straight' ? ' selected' : ''}>Straight back</option><option value="left"${this.opts.push === 'left' ? ' selected' : ''}>Tail left (nose right)</option><option value="right"${this.opts.push === 'right' ? ' selected' : ''}>Tail right (nose left)</option></select>`;
+      if (o === 'push') {
+        const sel = (k, v) => (this.opts[k] === v ? ' selected' : '');
+        return `<select data-opt="tow" aria-label="Tow method"><option value="tug"${sel('tow', 'tug')}>GA tug (TowMaster)</option><option value="bar"${sel('tow', 'bar')}>Hand tow bar (line tech)</option></select>`
+          + `<select data-opt="push" aria-label="Tow direction"><option value="straight"${sel('push', 'straight')}>Push straight back</option><option value="left"${sel('push', 'left')}>Push, tail left (nose right)</option><option value="right"${sel('push', 'right')}>Push, tail right (nose left)</option><option value="forward"${sel('push', 'forward')}>Tow forward</option></select>`;
+      }
       return '';
     };
     const rows = this.services().map((s) => {
@@ -386,48 +390,90 @@ export class PlayerGroundServices {
     ];
     return j;
   }
-  // ---------------- GA tug: tow / pushback
+  // ---------------- GA tow: TowMaster tug or a hand tow bar walked by a line tech (pushback or tow forward)
   jobPush() {
-    const j = this.newJob('Pushback'); const F = this.sim.fdm; const fr = this.frame(); const k = fr.k;
-    const tug = this.vehicle(j, GSE.gatug()); const drv = makePerson('crew', 61); drv.position.set(-0.55, 0.3, 0); drv.rotation.y = 0;
-    for (const l of drv.userData.limbs) { l.lp.rotation.z = 1.45; l.ap.rotation.z = 0.9; } tug.o.add(drv);
-    const nose = () => { const f = this.frame(); return f.w(1.36 * k, 0); };
-    const cradle = tug.o.userData.cradleX ?? 1.15;
-    const n0 = nose(); const tgt = [n0[0] + fr.f[0] * cradle, n0[1] + fr.f[1] * cradle]; const back = [-fr.f[0], -fr.f[1]];
-    const start = fr.w(28, 7); tug.at(start[0], start[1], back[0], back[1]);
-    const plan = this.opts.push === 'straight' ? { s1: 14, turn: 0, s2: 0 } : { s1: 3, turn: (this.opts.push === 'left' ? 1 : -1) * 90, s2: 2.5 };
-    const R = 6.5; const st = { M: null, hdg: fr.hdg, s: 0, v: 0, turned: 0, phase: 0, dir: [fr.f[0], fr.f[1]] };
+    const bar = this.opts.tow === 'bar'; const fwd = this.opts.push === 'forward';
+    const j = this.newJob(bar ? 'Tow bar' : 'Tug'); const F = this.sim.fdm; const fr = this.frame(); const k = fr.k;
+    const nwX = 1.36 * k, axleY = 0.17 * k; const nose = () => this.frame().w(nwX, 0);
+    let tug = null, tech = null, tb = null, attach;
+    const st = { M: null, hdg: fr.hdg, s: 0, v: 0, turned: 0, dir: [fr.f[0], fr.f[1]], walk: 0 };
+    // plan: straight back / tail left / tail right / tow forward (shorter, slower and tighter by hand)
+    const plan = fwd ? { s1: bar ? 8 : 12, turn: 0, s2: 0, sgn: 1 } : this.opts.push === 'straight' ? { s1: bar ? 9 : 14, turn: 0, s2: 0, sgn: -1 } : { s1: bar ? 2 : 3, turn: (this.opts.push === 'left' ? 1 : -1) * 90, s2: 2.5, sgn: -1 };
+    const R = bar ? 4.5 : 6.5, vMax = bar ? 0.55 : 0.9;
+    if (!bar) {
+      tug = this.vehicle(j, GSE.gatug()); const drv = makePerson('crew', 61); drv.position.set(-0.55, 0.3, 0); drv.rotation.y = 0;
+      for (const l of drv.userData.limbs) { l.lp.rotation.z = 1.45; l.ap.rotation.z = 0.9; } tug.o.add(drv);
+      const cradle = tug.o.userData.cradleX ?? 1.15;
+      attach = () => { const nw = nose(); const d = st.dir; tug.o.position.set(nw[0] + d[0] * cradle, this.gh(nw[0], nw[1]), nw[1] + d[1] * cradle); tug.o.rotation.y = yawOf(-d[0], -d[1]); };
+    } else {
+      tech = this.person(j, 'crew', 67); tb = GSE.towbar(); const Lb = tb.userData.len;
+      const carry = () => { tech.o.add(tb); const pc = Math.asin(Math.min(0.95, 0.9 / Lb)); tb.position.set(0.5 + Math.cos(pc) * Lb, 1.05 - Math.sin(pc) * Lb, 0); tb.rotation.set(0, Math.PI, pc, 'YXZ'); };
+      carry(); j.carry = carry;
+      // hands of the "carry" pose sit ~0.52 m ahead of the feet at ~1.07 m
+      const handH = 1.07 * (tech.o.userData.body?.scale.x ?? 1), reach = 0.52;
+      const horiz = Math.sqrt(Math.max(0.2, Lb * Lb - (handH - axleY) ** 2)); const pitch = Math.atan2(handH - axleY, horiz);
+      attach = () => {
+        const nw = nose(); const d = st.dir; const gy = this.gh(nw[0], nw[1]);
+        if (tb.parent !== this.root) { tech.o.remove(tb); this.addExtra(j, tb); }
+        tb.position.set(nw[0], gy + axleY, nw[1]); tb.rotation.set(0, yawOf(d[0], d[1]), pitch, 'YXZ');
+        const px = nw[0] + d[0] * (horiz + reach), pz = nw[1] + d[1] * (horiz + reach); tech.o.position.set(px, this.gh(px, pz), pz); tech.o.rotation.y = yawOf(-d[0], -d[1]);
+        tech.carry = true; tech.walkV = st.walk;
+      };
+      j.standOff = horiz + reach;
+    }
     this.pushState = st; this.pushJob = j;
-    const attach = () => { // keep the tug on the nose wheel, aligned with the nose wheel's direction of travel
-      const f = this.frame(); const nw = f.w(1.36 * k, 0); const d = st.dir; tug.o.position.set(nw[0] + d[0] * cradle, this.gh(nw[0], nw[1]), nw[1] + d[1] * cradle); tug.o.rotation.y = yawOf(-d[0], -d[1]);
-    };
+    const n0 = nose(); const fd = [fr.f[0], fr.f[1]], back = [-fd[0], -fd[1]];
+    const arriveSteps = bar ? (() => {
+      const from = this.fboPoint(fr); tech.at(from[0], from[1], fd[0], fd[1]);
+      const spot = [n0[0] + fd[0] * j.standOff, n0[1] + fd[1] * j.standOff];
+      return [
+        this.S.once(() => { j.status = 'Line tech en route'; this.toast('Line tech walking out with the tow bar', 2200); tech.carry = true; tech.go([fr.w(nwX + 5 * k, -4.5 * k), spot], 1.3); }),
+        this.S.arrive(tech),
+        this.S.once(() => { j.status = 'Attaching'; tech.carry = false; tech.work = 1; tech.o.rotation.y = yawOf(back[0], back[1]); }), this.S.wait(2.5),
+        this.S.once(() => { tech.work = 0; attach(); }),
+      ];
+    })() : (() => {
+      const cradle = tug.o.userData.cradleX ?? 1.15; const tgt = [n0[0] + fd[0] * cradle, n0[1] + fd[1] * cradle];
+      const start = fr.w(28, 7); tug.at(start[0], start[1], back[0], back[1]);
+      return [this.S.once(() => { j.status = 'Tug en route'; this.toast('Tug on the way', 2000); tug.go(route([start[0], start[1], fr.dir(-160)], [tgt[0], tgt[1], back]), 4); }), this.S.arrive(tug)];
+    })();
+    const what = fwd ? 'Towing forward' : plan.turn ? `Pushing back, tail ${plan.turn > 0 ? 'left' : 'right'}` : 'Pushing straight back';
     j.steps = [
-      this.S.once(() => { j.status = 'Tug en route'; this.toast('Tug on the way', 2000); tug.go(route([start[0], start[1], fr.dir(-160)], [tgt[0], tgt[1], back]), 4); }),
-      this.S.arrive(tug),
-      this.S.once(() => { j.status = 'Connected'; j.note = 'Tug connected — release the parking brake (P) to start the push'; this.toast('Tug connected · release the parking brake to begin', 3500); }),
-      this.S.until(() => !F.ctrl.parkBrake),
-      this.S.once(() => { j.status = 'Pushing back'; j.phase = 'active'; j.note = plan.turn ? `Pushing back, tail ${plan.turn > 0 ? 'left' : 'right'}` : 'Pushing straight back'; st.M = fr.w(-0.3 * k, 0); this.toast('Pushback started', 1800); }),
+      ...arriveSteps,
+      this.S.once(() => { j.status = 'Connected'; j.note = `${bar ? 'Tow bar' : 'Tug'} connected — release the parking brake (P) to start`; this.toast(`${bar ? 'Tow bar' : 'Tug'} connected · release the parking brake to begin`, 3500); }),
+      () => { attach(); return !F.ctrl.parkBrake; },
+      this.S.once(() => { j.status = fwd ? 'Towing' : 'Pushing back'; j.phase = 'active'; j.note = what; st.M = fr.w(-0.3 * k, 0); this.toast(fwd ? 'Tow started' : 'Pushback started', 1800); }),
       (dt) => {
-        if (F.eng.running || F.ctrl.throttle > 0.25 && F.eng.running) { j.note = 'Stopped — engine running'; this.stopPush(); }
+        if (F.eng.running) { j.note = 'Stopped — engine running'; this.stopPush(); }
         const total = plan.s1 + Math.abs(plan.turn) * D2R * R + plan.s2;
         const stopping = st.stop || st.s >= total - 0.01;
-        const vt = stopping ? 0 : Math.min(0.9, Math.sqrt(2 * 0.25 * Math.max(0, total - st.s)) + 0.05);
-        st.v += clamp(vt - st.v, -0.6 * dt, 0.35 * dt); const ds = st.v * dt; st.s += ds;
+        const vt = stopping ? 0 : Math.min(vMax, Math.sqrt(2 * 0.25 * Math.max(0, total - st.s)) + 0.05);
+        st.v += clamp(vt - st.v, -0.6 * dt, (bar ? 0.25 : 0.35) * dt); const ds = st.v * dt; st.s += ds; st.walk = st.v;
         let w = 0; if (plan.turn && st.s > plan.s1 && st.turned < Math.abs(plan.turn)) { w = Math.sign(plan.turn) * (ds / R) / D2R; st.turned += Math.abs(w); }
         const h = st.hdg * D2R, f = [Math.sin(h), -Math.cos(h)];
-        st.M = [st.M[0] - f[0] * ds, st.M[1] - f[1] * ds]; st.hdg = (st.hdg + w + 360) % 360;
-        // nose-wheel velocity -> tug direction
-        if (ds > 1e-5) { const h2 = st.hdg * D2R, f2 = [Math.sin(h2), -Math.cos(h2)], r2 = [Math.cos(h2), Math.sin(h2)]; const om = (w * D2R) / ds; const vx = -f2[0] + r2[0] * om * 1.66 * k, vz = -f2[1] + r2[1] * om * 1.66 * k; const l = Math.hypot(vx, vz); const want = [-vx / l, -vz / l]; st.dir = [st.dir[0] + (want[0] - st.dir[0]) * Math.min(1, dt * 3), st.dir[1] + (want[1] - st.dir[1]) * Math.min(1, dt * 3)]; const dl = Math.hypot(st.dir[0], st.dir[1]); st.dir = [st.dir[0] / dl, st.dir[1] / dl]; }
+        st.M = [st.M[0] + plan.sgn * f[0] * ds, st.M[1] + plan.sgn * f[1] * ds]; st.hdg = (st.hdg + w + 360) % 360;
+        // nose-wheel velocity -> direction of the tug / tow bar (always ahead of the nose wheel)
+        if (ds > 1e-5) {
+          const h2 = st.hdg * D2R, f2 = [Math.sin(h2), -Math.cos(h2)], r2 = [Math.cos(h2), Math.sin(h2)]; const om = (w * D2R) / ds;
+          const vx = plan.sgn * f2[0] + r2[0] * om * 1.66 * k, vz = plan.sgn * f2[1] + r2[1] * om * 1.66 * k; const l = Math.hypot(vx, vz);
+          const want = plan.sgn < 0 ? [-vx / l, -vz / l] : [vx / l, vz / l];
+          st.dir = [st.dir[0] + (want[0] - st.dir[0]) * Math.min(1, dt * 3), st.dir[1] + (want[1] - st.dir[1]) * Math.min(1, dt * 3)]; const dl = Math.hypot(st.dir[0], st.dir[1]); st.dir = [st.dir[0] / dl, st.dir[1] / dl];
+        }
         this.applyPush(); attach();
-        j.note = `${j.note.split(' ·')[0]} · ${st.s.toFixed(1)} m`;
+        j.note = `${what} · ${st.s.toFixed(1)} m`;
         return stopping && st.v < 0.02;
       },
-      this.S.once(() => { j.status = 'Set brake'; j.phase = 'leaving'; j.note = 'Push complete — set the parking brake (P) so the tug can disconnect'; this.toast('Push complete · set parking brake', 3000); this.pushState = null; }),
+      this.S.once(() => { st.walk = 0; attach(); j.status = 'Set brake'; j.phase = 'leaving'; j.note = `${fwd ? 'Tow' : 'Push'} complete — set the parking brake (P) so the ${bar ? 'tow bar' : 'tug'} can be disconnected`; this.toast(`${fwd ? 'Tow' : 'Push'} complete · set parking brake`, 3000); this.pushState = null; }),
       this.S.until(() => F.ctrl.parkBrake),
-      this.S.once(() => { j.status = 'Disconnecting'; }), this.S.wait(2),
-      this.S.once(() => { const p = tug.o.position; const d = st.dir; tug.go([[p.x + d[0] * 3.5, p.z + d[1] * 3.5]], 1.0, { reverse: true }); }), this.S.arrive(tug),
-      this.S.once(() => { j.status = 'Leaving'; this.toast('Tug disconnected · clear to start and taxi', 2800); const p = tug.o.position, d = st.dir, s2 = [-d[1], d[0]]; const end = [p.x + d[0] * 25 + s2[0] * 25, p.z + d[1] * 25 + s2[1] * 25]; tug.go(route([p.x, p.z, d], [end[0], end[1], s2]), 4); }),
-      this.S.arrive(tug),
+      this.S.once(() => { j.status = 'Disconnecting'; if (bar) { tech.walkV = 0; tech.carry = false; tech.work = 1; } }), this.S.wait(2),
+      ...(bar ? [
+        this.S.once(() => { this.removeExtra(j, tb); tech.work = 0; j.carry(); tech.carry = true; const p = tech.o.position, d = st.dir; tech.go([[p.x + d[0] * 2.5 + d[1] * 3, p.z + d[1] * 2.5 - d[0] * 3], this.fboPoint(this.frame())], 1.3); j.status = 'Leaving'; this.toast('Tow bar removed · clear to start and taxi', 2800); }),
+        this.S.arrive(tech),
+      ] : [
+        this.S.once(() => { const p = tug.o.position; const d = st.dir; tug.go([[p.x + d[0] * 3.5, p.z + d[1] * 3.5]], 1.0, { reverse: true }); }), this.S.arrive(tug),
+        this.S.once(() => { j.status = 'Leaving'; this.toast('Tug disconnected · clear to start and taxi', 2800); const p = tug.o.position, d = st.dir, s2 = [-d[1], d[0]]; const end = [p.x + d[0] * 25 + s2[0] * 25, p.z + d[1] * 25 + s2[1] * 25]; tug.go(route([p.x, p.z, d], [end[0], end[1], s2]), 4); }),
+        this.S.arrive(tug),
+      ]),
     ];
     return j;
   }
@@ -450,7 +496,8 @@ function buildGateServices_(a, stands, { group, gh, rnd, major }) {
   const ground = (x, z) => gh(x, z) + 0.06;
   const onApron = (x, z) => a.aprons.some((ap) => pointInPoly(x, z, ap.p));
   // choose pushback stands (narrow-bodies whose push and taxi-out path stays on the apron)
-  let pushLeft = major ? (a.icao === 'KSFO' ? 2 : 1) : 0, remoteLeft = major ? (a.icao === 'KSFO' ? 3 : 1) : 0;
+  // regional fields: one stand runs the pushback cycle and (with 3+ stands) one is a remote stand served by stairs and a bus
+  let pushLeft = major ? (a.icao === 'KSFO' ? 2 : 1) : (stands.length >= 2 ? 1 : 0), remoteLeft = major ? (a.icao === 'KSFO' ? 3 : 1) : (stands.length >= 3 ? 1 : 0);
   const cargo = (lv) => lv === 'FDX' || lv === 'UPS';
   const order = stands.map((s, i) => i).sort(() => rnd() - 0.5);
   for (const i of order) {
@@ -470,6 +517,7 @@ function buildGateServices_(a, stands, { group, gh, rnd, major }) {
     if (remoteLeft > 0 && rnd() < 0.5) { s.mode = 'remote'; remoteLeft--; continue; }
     s.mode = 'gate';
   }
+  const busy = major ? 1 : 1.5; // few gates at regional fields, so each one is in the middle of a turnaround
   for (const s of stands) {
     const T = s.G.T, L = T.L, R = T.D / 2, gearH = s.G.gearH; const g0 = gh(s.cx, s.cz);
     const f = [-s.nx, -s.nz], rt = [s.nz, -s.nx], lf = [-s.nz, s.nx];
@@ -492,13 +540,13 @@ function buildGateServices_(a, stands, { group, gh, rnd, major }) {
     if (s.mode !== 'push') { const cg = GSE.cones(cones); cg.position.set(0, g0 + 0.04, 0); sv.bake(cg); }
     const crewHere = [];
     // ---- GPU at the nose
-    if (s.mode !== 'push' && (s.mode === 'cargo' || rnd() < 0.55)) {
+    if (s.mode !== 'push' && (s.mode === 'cargo' || rnd() < 0.55 * busy)) {
       const p = P(0.33 * L, 4.2); const gpu = put(GSE.gpu(), p, f); sv.bake(gpu);
       const plugP = P(0.36 * L, 0.6); const a0 = V3(p[0], ground(p[0], p[1]) + 1.0, p[1]); const b0 = V3(plugP[0], g0 + gearH - R * 0.85, plugP[1]);
       sv.bake(hoseMesh([a0, V3((a0.x + b0.x) / 2, g0 + 0.12, (a0.z + b0.z) / 2), b0], 0.04));
     }
     // ---- baggage: belt loader at the forward hold, tractor and carts alongside
-    if (s.mode !== 'push' && (s.mode === 'cargo' || s.mode === 'remote' || rnd() < 0.6)) {
+    if (s.mode !== 'push' && (s.mode === 'cargo' || s.mode === 'remote' || rnd() < 0.6 * busy)) {
       const dp = P(0.25 * L, R); const hs = gearH - 0.85 * R;
       const belt = GSE.belt(); setBelt(belt, hs); const ld = yaw(-Math.PI / 2 + 0.12); // facing the fuselage
       put(belt, [dp[0] - ld[0] * 4.05, dp[1] - ld[1] * 4.05], ld); sv.bake(belt);
@@ -508,12 +556,12 @@ function buildGateServices_(a, stands, { group, gh, rnd, major }) {
       crewHere.push({ kind: 'crew', stand: P(0.25 * L - 0.9, R + 3.3), face: [-rt[0], -rt[1]], work: true });
     }
     // ---- catering high-loader at R2 (raised to the door)
-    if (s.mode === 'gate' && rnd() < 0.4) {
+    if (s.mode === 'gate' && rnd() < 0.4 * busy) {
       const dp = P(-0.3 * L, R); const dir = [-rt[0], -rt[1]]; const cat = GSE.catering();
       put(cat, [dp[0] + rt[0] * (5.9 + 0.25), dp[1] + rt[1] * (5.9 + 0.25)], dir); setLift(cat, sill); sv.bake(cat);
     }
     // ---- Jet A truck ahead of the right wing with the hose to the underwing coupling
-    if ((s.mode === 'gate' || s.mode === 'remote') && rnd() < 0.45) {
+    if ((s.mode === 'gate' || s.mode === 'remote') && rnd() < 0.45 * busy) {
       const z = 0.3 * T.span, le = 0.06 * L + L * (T.wide ? 0.17 : 0.19) * 0.5 - Math.tan(T.sweep * D2R) * z;
       const tp = P(le + 7.4, z + 0.5); const truck = put(GSE.jet(), tp, f); sv.bake(truck);
       truck.updateMatrixWorld(); const reel = V3(2.85, 1.95, 1.3).applyMatrix4(truck.matrixWorld);
