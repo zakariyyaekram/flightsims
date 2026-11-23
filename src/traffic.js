@@ -168,7 +168,7 @@ export class Traffic {
       const aoa = agl < 1 ? 0 : fl.ga ? 0.05 : (fl.r.kind === 'arr' ? 0.05 : 0.12);
       fl.obj.position.copy(p);
       fl.obj.rotation.set(climb + aoa, -yaw, -fl.bank);
-      const vis = (p.x - cam.x) ** 2 + (p.z - cam.z) ** 2 < 60000 ** 2;
+      const vis = (p.x - cam.x) ** 2 + (p.z - cam.z) ** 2 < (this.light ? 18000 : 30000) ** 2; // AI drawn only within this range
       fl.obj.visible = vis;
       if (fl.obj.userData.beacon) fl.obj.userData.beacon.visible = (this.t * 1.1 + i * 0.37) % 1 < 0.15;
       out.push({ callsign: fl.callsign, ident: fl.ident || fl.callsign, type: fl.type, x: p.x, y: p.y, z: p.z, hdg: (yaw / D2R + 360) % 360, alt: p.y / FT, gs: o.v / KT, ga: !!fl.ga, kind: fl.r.kind, icao: fl.r.icao, rwy: fl.r.rwy });

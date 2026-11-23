@@ -22,7 +22,9 @@ import { setAniso } from './textures.js';
 import { ATC } from './atc.js?v=20261123c';
 import { PlayerGroundServices } from './groundservices.js';
 import { tickGSE } from './gse.js';
-import { initCesium, syncCesiumCamera, getCesiumElevationWorld, warmCesiumTerrain } from './cesium.js?v=20261120';
+import { remap, buildControlsUI, changedCount, mouseSettings, mouseAxis } from './controls.js?v=20261123f';
+import { PerfMonitor } from './perf.js?v=20261123f';
+import { initCesium, syncCesiumCamera, getCesiumElevationWorld, warmCesiumTerrain, setCesiumQuality } from './cesium.js?v=20261123f';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
@@ -45,9 +47,11 @@ if (renderer) {
   renderer.toneMappingExposure = 0.5;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.autoUpdate = false; // refreshed explicitly each frame (or every other frame when the perf governor asks)
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   setAniso(Math.min(16, renderer.capabilities.getMaxAnisotropy()));
 }
+const perf = renderer ? new PerfMonitor({ renderer, chip: document.getElementById('perfChip'), detail: document.getElementById('fps') }) : null;
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.02, 90000);
 scene.add(camera);
@@ -57,7 +61,7 @@ const sim = {
   weather: { windDir: 250, windKt: 8, turb: 0.25, cover: 0.45, baseFt: 4500, visKm: 40, qnhInHg: 30.02, isa: 5 }, sound: new Sound(),
   groundServices: { active: false, airport: null },
 };
-window.sim = sim; sim.scene = scene; sim.renderer = renderer;
+window.sim = sim; sim.scene = scene; sim.renderer = renderer; sim.perf = perf;
 sim.atc = new ATC();
 const f = () => sim.fdm;
 sim.fdm.env.ground = groundQuery;
@@ -87,31 +91,52 @@ const LIGHT_RADIUS = 8000;            // m of terrain built/drawn around the cam
 const LIGHT_AIRPORT_LOAD = LIGHT_RADIUS + 2500;   // airports whose center is within this get built
 const LIGHT_AIRPORT_UNLOAD = LIGHT_AIRPORT_LOAD + 4000; // ...and freed once beyond this (hysteresis)
 
+// Heavy Edition streaming ranges, modelled on FlightGear's LOD bands (detailed objects ~1.5 km, rough ~7.5 km,
+// bare terrain ~30 km) and X-Plane's "build the clutter near you, drop it behind you" loader.
+const HEAVY_RADIUS = 30000;
+const HEAVY_AIRPORT_LOAD = 16000, HEAVY_AIRPORT_UNLOAD = 22000;
+const PREFETCH_S = 45; // look this many seconds ahead along the flight path when deciding what to load
+
 // Streams airports (runways, buildings, lights, parked aircraft) in and out around the aircraft.
+// One airport is built at a time, nearest first (also counting where the aircraft will be in PREFETCH_S seconds),
+// so loading never stalls the frame for long; airports far behind are disposed.
 class LocalAirports {
-  constructor(scene, buildAircraftFn) {
+  constructor(scene, buildAircraftFn, opts = {}) {
     this.scene = scene; this.buildAircraftFn = buildAircraftFn;
-    this.loaded = new Map(); this.loading = new Map();
+    this.loadR = opts.load ?? LIGHT_AIRPORT_LOAD; this.unloadR = opts.unload ?? LIGHT_AIRPORT_UNLOAD;
+    this.elevFn = opts.elevFn || null; this.warm = opts.warm || null;
+    this.loaded = new Map(); this.loading = new Map(); this.busy = null;
   }
-  update(pos) {
-    const jobs = [];
+  // pos: camera position; returns the job for the nearest airport that is (being) loaded, if any
+  update(pos, ahead = null) {
+    const want = [];
     for (const a of AIRPORTS) {
       const d = Math.hypot(a.arp[0] - pos.x, a.arp[1] - pos.z);
-      if (d < LIGHT_AIRPORT_LOAD && !this.loaded.has(a.icao)) {
-        if (!this.loading.has(a.icao)) {
-          const job = buildAirports(this.scene, null, this.buildAircraftFn, null, [a])
-            .then((r) => { this.loading.delete(a.icao); this.loaded.set(a.icao, r); })
-            .catch((e) => { this.loading.delete(a.icao); console.warn('Airport load failed', a.icao, e); });
-          this.loading.set(a.icao, job);
-        }
-        jobs.push(this.loading.get(a.icao));
-      } else if (d > LIGHT_AIRPORT_UNLOAD && this.loaded.has(a.icao)) {
+      const da = ahead ? Math.hypot(a.arp[0] - ahead.x, a.arp[1] - ahead.z) : d;
+      const dm = Math.min(d, da);
+      if (dm < this.loadR && !this.loaded.has(a.icao)) want.push([dm, a]);
+      else if (d > this.unloadR && (!ahead || da > this.unloadR) && this.loaded.has(a.icao)) {
         this.loaded.get(a.icao).dispose();
         this.loaded.delete(a.icao);
       }
     }
-    return Promise.all(jobs);
+    want.sort((x, y) => x[0] - y[0]);
+    if (!this.busy && want.length) {
+      const a = want[0][1];
+      this.busy = (async () => {
+        try {
+          if (this.warm) await this.warm(a);
+          const r = await buildAirports(this.scene, null, this.buildAircraftFn, this.elevFn, [a]);
+          this.loaded.set(a.icao, r);
+        } catch (e) { console.warn('Airport load failed', a.icao, e); }
+        this.busy = null;
+      })();
+    }
+    this.pendingCount = want.length;
+    return this.busy || Promise.resolve();
   }
+  // load everything currently wanted (used during the loading screen)
+  async fill(pos, max = 99) { for (let i = 0; i < max; i++) { await this.update(pos); if (!this.pendingCount && !this.busy) break; } }
   updateLights(camPos, night, t) { for (const r of this.loaded.values()) r.updateLights(camPos, night, t); }
   updateServices(dt, camPos, t) { for (const r of this.loaded.values()) r.updateServices?.(dt, camPos, t); }
 }
@@ -136,10 +161,7 @@ async function init() {
     env.sky.visible = !cesiumViewer;
     if (cesiumViewer) {
       sim.fdm.env.ground = cesiumGroundQuery;
-      progress(0.18, 'Sampling real-world airport elevations…');
-      for (const a of AIRPORTS) {
-        await warmCesiumTerrain(a.arp[0], a.arp[1], Math.max(a.radius + 300, 1900), 300);
-      }
+      // elevations are now sampled per airport as it streams in (not all up front)
     }
     progress(0.36, 'Loading World Terrain, aerial imagery and 3D buildings…');
   } else {
@@ -163,9 +185,9 @@ async function init() {
     );
     terrain = loadMode === 'light'
       ? new Terrain(scene, terrainMat, { radius: LIGHT_RADIUS, maxTileSize: 4096, minTileSize: 256, lodScale: 1.0 })
-      : new Terrain(scene, terrainMat);
+      : new Terrain(scene, terrainMat, { radius: HEAVY_RADIUS, maxTileSize: 16384 });
     // haze reaches ~full opacity at the edge of the loaded area
-    env.minFogDensity = loadMode === 'light' ? 2.0 / LIGHT_RADIUS : 0;
+    env.minFogDensity = loadMode === 'light' ? 2.0 / LIGHT_RADIUS : 1.6 / HEAVY_RADIUS;
   }
   airports = null;
   rocks = null;
@@ -190,15 +212,22 @@ async function init() {
     await airports.update({ x: sim.fdm.pos[0], z: sim.fdm.pos[2] });
     progress(0.66, 'Local area ready…');
   } else {
-    progress(0.58, 'Building airports, runways and taxiways…');
-    airports = await buildAirports(
-      scene,
-      null,
-      buildAircraft,
-      cesiumViewer ? getCesiumElevationWorld : null,
-    );
-    progress(0.66, 'Building airport terminals and hangars…');
+    // Heavy Edition streams too: spawn, sample real elevation around the aircraft only, then build the
+    // nearest airport and let the others load in the background as they come into range.
+    airports = new LocalAirports(scene, buildAircraft, {
+      load: HEAVY_AIRPORT_LOAD, unload: HEAVY_AIRPORT_UNLOAD,
+      elevFn: cesiumViewer ? getCesiumElevationWorld : null,
+      warm: cesiumViewer ? (a) => warmCesiumTerrain(a.arp[0], a.arp[1], Math.max(a.radius + 300, 1900), 300) : null,
+    });
     applySetup(readSetup(), true);
+    if (cesiumViewer) {
+      progress(0.56, 'Sampling real-world elevation around the aircraft…');
+      await warmCesiumTerrain(sim.fdm.pos[0], sim.fdm.pos[2], 2500, 300);
+      applySetup(readSetup(), true);
+    }
+    progress(0.6, 'Building the departure airport…');
+    await airports.update({ x: sim.fdm.pos[0], z: sim.fdm.pos[2] });
+    progress(0.66, 'Other airports stream in as you fly…');
   }
   sim.ready = true;
   await new Promise((resolve) => requestAnimationFrame(resolve));
@@ -252,13 +281,14 @@ async function init() {
   life = await buildLife(scene, { cars: loadMode === 'light' ? 160 : 380, streets: scenery ? (x, z, r) => scenery.streetsNear(x, z, r) : null, realFarms, flatStreets: !!ground });
   if (loadMode === 'light') life.quality = 0.55;
   sim.life = life;
+  life.setRoadTraffic(readSetup().roadTraffic);
   if (!sim.gs) { $('gsChip')?.addEventListener('click', () => sim.gs?.toggle()); }
   if (!sim.gs) sim.gs = new PlayerGroundServices({ scene, sim, toast, groundH: (x, z) => groundQuery(x, z).h });
   progress(0.93, 'Air traffic…');
   traffic = new Traffic(scene, { light: loadMode === 'light' });
   await traffic.init(buildAircraft);
   traffic.setEnabled(sim.aiTrafficEnabled !== false);
-  sim.traffic = traffic; sim.scenery = scenery;
+  sim.traffic = traffic; sim.scenery = scenery; sim.airports = airports; sim.terrain = terrain;
   if (scenery) for (let i = 0; i < 60; i++) scenery.update({ x: sim.fdm.pos[0], z: sim.fdm.pos[2] });
 
   progress(0.95, 'World scene ready…');
@@ -308,7 +338,7 @@ aircraftTypeSelect.addEventListener('change', () => {
 function readSetup() {
   return {
     aircraftType: $('aircraftType').value, spawn: $('spawn').value, tod: +$('tod').value, windDir: +$('wdir').value, windKt: +$('wspd').value, turb: +$('turb').value,
-    cover: +$('clouds').value, baseFt: +$('cbase').value, visKm: +$('vis').value, qnhInHg: +$('qnh').value, isa: +$('isa').value, fuel: +$('fuel').value, quality: $('quality').value,
+    cover: +$('clouds').value, baseFt: +$('cbase').value, visKm: +$('vis').value, qnhInHg: +$('qnh').value, isa: +$('isa').value, fuel: +$('fuel').value, quality: $('quality').value, autoRes: $('autoRes').checked, roadTraffic: $('roadTraffic').value,
     atcEnabled: $('atcEnabled').checked, aiTraffic: $('aiTraffic').checked,
     failureScenario: $('failureScenario').value, triggerFailureAtStart: $('triggerFailureAtStart').checked,
   };
@@ -353,7 +383,8 @@ function applySetup(s, warmOnly = false) {
   sim.night = lightState.night;
   // quality
   const q = { high: [1.75, 4096, 1.0], balanced: [1.25, 2048, 0.65], perf: [0.75, 512, 0.18], lite: [0.6, 256, 0.08] }[s.quality] || [1.25, 2048, 0.65];
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, q[0]));
+  perf.setAuto(s.autoRes !== false); perf.setBase(Math.min(window.devicePixelRatio, q[0]));
+  if (life) life.setRoadTraffic?.(s.roadTraffic);
   if (env.sun.shadow.mapSize.x !== q[1]) { env.sun.shadow.mapSize.set(q[1], q[1]); if (env.sun.shadow.map) { env.sun.shadow.map.dispose(); env.sun.shadow.map = null; } }
   if (forest) { forest.quality = q[2]; forest.lastKey = null; }
   if (rocks) { rocks.quality = q[2]; rocks.lastCell = null; }
@@ -526,14 +557,15 @@ function toast(msg, ms = 1800) { const t = $('toast'); t.textContent = msg; t.cl
 window.addEventListener('keydown', (e) => {
   if (e.target && (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT')) return;
   sim.sound.start();
+  const code = remap(e.code); if (code == null) return;
   const k = e.key; const F = sim.fdm, S = F.sys, av = sim.av;
-  sim.keys[e.code] = true; sim.keys.Shift = e.shiftKey;
-  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End', 'Space', 'Slash'].includes(e.code)) e.preventDefault();
+  sim.keys[code] = true; sim.keys.Shift = e.shiftKey;
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End', 'Space', 'Slash'].includes(code)) e.preventDefault();
   if (!sim.started) return;
-  if (e.repeat && !['KeyI', 'BracketLeft', 'BracketRight'].includes(e.code)) { if (e.shiftKey && e.code.startsWith('Arrow')) {} else return; }
+  if (e.repeat && !['KeyI', 'BracketLeft', 'BracketRight'].includes(code)) { if (e.shiftKey && code.startsWith('Arrow')) {} else return; }
   const sh = e.shiftKey;
-  switch (e.code) {
-    case 'Escape': if (!$('help').classList.contains('hidden')) { $('help').classList.add('hidden'); break; } if (!$('mapWrap').classList.contains('hidden')) { toggleMap(false); break; } togglePause(); if (sim.paused) showMenu(true); break;
+  switch (code) {
+    case 'Escape': if (!$('help').classList.contains('hidden')) { setHelp(false); break; } if (!$('mapWrap').classList.contains('hidden')) { toggleMap(false); break; } togglePause(); if (sim.paused) showMenu(true); break;
     case 'KeyF':
       if (sh) toggleFailurePanel();
       else if (!walkView()) { F.ctrl.flaps = Math.min(3, F.ctrl.flaps + 1); toast('Flaps ' + ['UP', '10°', '20°', 'FULL'][F.ctrl.flaps]); }
@@ -564,15 +596,16 @@ window.addEventListener('keydown', (e) => {
     case 'KeyG': toggleATC(); break;
     case 'KeyU': $('strip').classList.toggle('hidden'); break;
     case 'KeyC': setView(views[(views.indexOf(sim.view) + 1) % views.length]); break;
-    case 'Digit1': case 'Digit2': case 'Digit3': case 'Digit4': case 'Digit5': case 'Digit6': case 'Digit7': setView(views[+e.code.slice(5) - 1]); break;
+    case 'Digit1': case 'Digit2': case 'Digit3': case 'Digit4': case 'Digit5': case 'Digit6': case 'Digit7': setView(views[+code.slice(5) - 1]); break;
     case 'Digit9': sim.simRate = sim.simRate >= 4 ? 1 : sim.simRate * 2; toast('Sim rate ' + sim.simRate + '×'); break;
     case 'Space': look.yaw = 0; look.pitch = -10; camera.fov = 58; camera.updateProjectionMatrix(); break;
-    case 'Slash': $('help').classList.toggle('hidden'); break;
-    case 'ArrowLeft': case 'ArrowRight': if (sh) { av.hdgBug = (av.hdgBug + (e.code === 'ArrowLeft' ? -1 : 1) * 5 + 360) % 360; } break;
-    case 'ArrowUp': case 'ArrowDown': if (sh) av.apButton(e.code === 'ArrowUp' ? 'UP' : 'DN', F); break;
+    case 'Slash': setHelp($('help').classList.contains('hidden')); break;
+    case 'Semicolon': togglePerfDetail(); break;
+    case 'ArrowLeft': case 'ArrowRight': if (sh) { av.hdgBug = (av.hdgBug + (code === 'ArrowLeft' ? -1 : 1) * 5 + 360) % 360; } break;
+    case 'ArrowUp': case 'ArrowDown': if (sh) av.apButton(code === 'ArrowUp' ? 'UP' : 'DN', F); break;
   }
 });
-window.addEventListener('keyup', (e) => { sim.keys[e.code] = false; sim.keys.Shift = e.shiftKey; if (e.code === 'KeyI' && sim.fdm.sys.mags === 4) sim.startHeld = 0; });
+window.addEventListener('keyup', (e) => { const code = remap(e.code); if (code == null) return; sim.keys[code] = false; sim.keys.Shift = e.shiftKey; if (code === 'KeyI' && sim.fdm.sys.mags === 4) sim.startHeld = 0; });
 window.addEventListener('blur', () => { sim.keys = {}; });
 
 const walkView = () => sim.view === 'cabin' || sim.view === 'walk';
@@ -608,6 +641,8 @@ canvas.addEventListener('pointerdown', (e) => {
   sim.sound.start();
   canvas.focus?.();
   look.dragging = true; look.lx = e.clientX; look.ly = e.clientY; look.moved = 0; look.button = e.button;
+  if (mouse.yoke && e.button === 2 && mouseSettings.rudderButton) { mouse.rudder = true; look.dragging = false; }
+  if (mouse.yoke && e.button === 0 && !panelHit(e.clientX, e.clientY)) look.dragging = false; // left button flies, it does not drag the view
   canvas.setPointerCapture?.(e.pointerId);
   // press-and-hold controls (ignition START, annunciator TEST, ...)
   look.hold = null;
@@ -627,7 +662,7 @@ canvas.addEventListener('pointermove', (e) => {
   else { look.yaw = clamp(look.yaw - dx * k * 1.2, -170, 170); look.pitch = clamp(look.pitch - dy * k * 1.2, -80, 70); }
 });
 canvas.addEventListener('pointerup', (e) => {
-  look.dragging = false;
+  look.dragging = false; if (e.button === 2) mouse.rudder = false;
   if (look.hold) { look.hold.up?.(e.button); look.hold = null; sim.panelDirty = true; return; }
   if (look.moved < 4) panelClick(e.clientX, e.clientY, e.button);
 });
@@ -635,6 +670,7 @@ canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   const h = panelHit(e.clientX, e.clientY);
   if (h && h.wheel) { h.wheel(e.deltaY); sim.sound.click(); return; }
+  if (mouse.yoke && mouseSettings.wheelThrottle && sim.started && !walkView()) { const c = sim.fdm.ctrl; c.throttle = clamp(c.throttle - Math.sign(e.deltaY) * 0.04, 0, 1); toast('Throttle ' + Math.round(c.throttle * 100) + '%', 700); return; }
   if (sim.view === 'orbit' || sim.view === 'chase') orbit.dist = clamp(orbit.dist * (1 + Math.sign(e.deltaY) * 0.1), 6, 400);
   else { camera.fov = clamp(camera.fov + Math.sign(e.deltaY) * 4, 18, 95); camera.updateProjectionMatrix(); }
 }, { passive: false });
@@ -685,7 +721,11 @@ function updateControls(dt) {
   ctrlState.ail = rate(ctrlState.ail, ta * 0.85, 2.0, 3.0);
   ctrlState.rud = rate(ctrlState.rud, tr, 1.6, 2.2);
   let elev = ctrlState.elev, ail = ctrlState.ail, rud = ctrlState.rud;
-  if (mouse.yoke) { elev += clamp(mouse.ny * 1.1, -1, 1); ail += clamp(mouse.nx * 1.1, -1, 1); }
+  if (mouse.yoke) {
+    elev += mouseAxis(mouse.ny) * (mouseSettings.invert ? -1 : 1);
+    // right button held: mouse X steers the rudder / nose wheel instead of the ailerons
+    if (mouse.rudder) rud += mouseAxis(mouse.nx); else ail += mouseAxis(mouse.nx);
+  }
   const gp = readGamepad();
   if (gp) {
     ail += gp.ail; elev += gp.elev; rud += gp.rud;
@@ -975,6 +1015,8 @@ function showMenu(on) {
   $('menu').classList.toggle('hidden', !on);
   if (on) { $('fly').textContent = sim.started ? 'Apply & restart' : 'Fly'; if (sim.started && !$('resume')) { const b = document.createElement('button'); b.id = 'resume'; b.type = 'button'; b.textContent = 'Resume'; b.onclick = () => { showMenu(false); togglePause(false); }; $('fly').after(b); } }
 }
+function togglePerfDetail() { $('fps').classList.toggle('hidden'); }
+$('perfChip')?.addEventListener('click', togglePerfDetail);
 function togglePause(force) { sim.paused = force ?? !sim.paused; $('pauseChip').classList.toggle('hidden', !sim.paused); }
 $('fly').onclick = () => {
   sim.sound.start();
@@ -985,8 +1027,34 @@ $('fly').onclick = () => {
   toast(sim.fdm.eng.running ? 'Press ? for controls.  Mixture, trim and flaps are yours.' : `Parked cold & dark${sim.taxi ? ' — taxi to Rwy ' + sim.taxi.route.rwy + ' via ' + sim.taxi.route.viaText : ''}. Press H for the checklist and engine-start guide, T for the taxi line.`, 7000);
   canvas.focus?.();
 };
-$('showHelp').onclick = () => $('help').classList.remove('hidden');
-$('helpClose').onclick = () => $('help').classList.add('hidden');
+$('showHelp').onclick = () => setHelp(true);
+$('helpClose').onclick = () => setHelp(false);
+// the controls window pauses the simulation while it is open (and resumes only if it did the pausing)
+let helpPaused = false, ctlUI = null;
+function setHelp(on) {
+  const el = $('help');
+  if (on) {
+    if (!ctlUI) ctlUI = buildControlsUI($('ctlSettings'), { toast, onChange: updateKeyNote });
+    updateKeyNote();
+    el.classList.remove('hidden');
+    if (sim.started && !sim.paused) { togglePause(true); helpPaused = true; }
+    sim.keys = {};
+  } else {
+    ctlUI?.stop();
+    el.classList.add('hidden');
+    if (helpPaused) { helpPaused = false; if ($('menu').classList.contains('hidden')) togglePause(false); }
+    canvas.focus?.();
+  }
+}
+function updateKeyNote() {
+  const n = changedCount(); const note = $('keyNote');
+  if (note) note.textContent = n ? `${n} key${n > 1 ? 's' : ''} customised — the list below shows the defaults; see Key bindings for yours.` : 'Simulation paused while this window is open.';
+}
+for (const b of document.querySelectorAll('#help .helpTab')) b.addEventListener('click', () => {
+  for (const x of document.querySelectorAll('#help .helpTab')) x.classList.toggle('on', x === b);
+  $('helpRef').classList.toggle('hidden', b.dataset.tab !== 'ref'); $('ctlSettings').classList.toggle('hidden', b.dataset.tab !== 'ctl');
+  if (b.dataset.tab === 'ctl' && !ctlUI) ctlUI = buildControlsUI($('ctlSettings'), { toast, onChange: updateKeyNote });
+});
 $('retry').onclick = () => { applySetup(lastSetup); $('crash').classList.add('hidden'); togglePause(false); };
 $('toMenu').onclick = () => { $('crash').classList.add('hidden'); showMenu(true); };
 
@@ -1033,9 +1101,12 @@ function frame(dtReal) {
   camPos.copy(camera.position);
   // world streaming
   const agl = camPos.y - heightAt(camPos.x, camPos.z);
-  if (airports?.update && (airportStreamTick = (airportStreamTick + 1) % 30) === 0) airports.update(camPos);
+  // predictive prefetch: also load what lies ahead along the flight path
+  const vel = sim.fdm.vel || [0, 0, 0];
+  const ahead = { x: camPos.x + (vel[0] || 0) * PREFETCH_S, z: camPos.z + (vel[2] || 0) * PREFETCH_S };
+  if (airports?.update && (airportStreamTick = (airportStreamTick + 1) % 30) === 0) airports.update(camPos, ahead);
   if (terrain) {
-    terrain.update(camPos, agl, 6);
+    terrain.update(camPos, agl, 6, false, { x: camPos.x + (vel[0] || 0) * 20, y: camPos.y + (vel[1] || 0) * 20, z: camPos.z + (vel[2] || 0) * 20 });
     if (terrainMat) terrainMat.userData.uniforms.uCam.value.copy(camPos);
   }
   if (forest && rocks) { forest.update(camPos, 3); rocks.update(camPos, 3); }
@@ -1056,7 +1127,7 @@ function frame(dtReal) {
   // panel texture
   const inside = sim.view === 'cockpit' || sim.view === 'cabin';
   panelT += dt;
-  if (sim.panel && (inside || !sim.started) && (panelT > 1 / 30 || sim.panelDirty)) {
+  if (sim.panel && (inside || !sim.started) && (panelT > (perf.rating === 'poor' ? 1 / 12 : perf.rating === 'ok' ? 1 / 20 : 1 / 30) || sim.panelDirty)) {
     panelT = 0; sim.panelDirty = false;
     sim.panel.draw(sim, t);
     aircraft.userData.parts.panelTex.needsUpdate = true;
@@ -1070,8 +1141,10 @@ function frame(dtReal) {
     if (!$('atcPanel').classList.contains('hidden')) updateATCPanel();
   }
   syncCesiumCamera(camera);
+  if ((sim._cq = (sim._cq || 0) + 1) % 60 === 0) setCesiumQuality(perf.auto ? perf.scale : 1);
+  renderer.shadowMap.needsUpdate = perf.shadowThisFrame();
   if (!sim.noRender) renderer.render(scene, camera);
-  frames++; fpsT += dtReal; if (fpsT > 0.5) { fpsVal = frames / fpsT; frames = 0; fpsT = 0; if (!$('fps').classList.contains('hidden')) $('fps').textContent = `${fpsVal.toFixed(0)} fps\n${renderer.info.render.calls} calls\n${(renderer.info.render.triangles / 1e6).toFixed(2)} M tris${terrain ? `\ntiles ${terrain.visibleCount}` : ''}`; }
+  perf.frame(dtReal, { extra: terrain ? `tiles ${terrain.visibleCount}${terrain.pending ? ' (+' + terrain.pending + ' queued)' : ''}` : '' });
 }
 sim.frame = frame;
 
@@ -1214,7 +1287,6 @@ function loop() {
   if (sim.ready && !MANUAL) frame(dt);
   requestAnimationFrame(loop);
 }
-window.addEventListener('keydown', (e) => { if (e.code === 'Semicolon') $('fps').classList.toggle('hidden'); });
 window.addEventListener('resize', () => { renderer.setSize(window.innerWidth, window.innerHeight); camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); if (!$('mapWrap').classList.contains('hidden')) toggleMap(true); });
 
 // test hooks
