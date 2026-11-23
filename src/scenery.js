@@ -217,6 +217,10 @@ export class Scenery {
   }
   update(cam) {
     if (this.busy) return;
+    // nothing to stream: skip the tile scans until the camera has moved (or once a second as a safety net)
+    const mv = this._lu ? Math.hypot(cam.x - this._lu.x, cam.z - this._lu.z) : 1e9;
+    if (mv < 40 && !this._dirty && (this._skip = (this._skip || 0) + 1) < 60) return;
+    this._skip = 0; this._lu = { x: cam.x, z: cam.z };
     const t0 = performance.now();
     // major roads
     const RT = ROAD_TILE, rr = this.roadR;
@@ -249,6 +253,7 @@ export class Scenery {
       this.cells.set(k, this.buildCell(cx, cz, st.ways, bt.d)); this.bldTiles.delete(k); built++;
     }
     for (const [k, c] of this.cells) if ((c.cx - cam.x) ** 2 + (c.cz - cam.z) ** 2 > (cr + CELL * 1.8) ** 2) { this.free(c.obj); this.cells.delete(k); }
+    this._dirty = !!best || want.length > built;
   }
   free(obj) {
     if (!obj) return; this.group.remove(obj);

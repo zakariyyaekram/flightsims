@@ -844,6 +844,8 @@ export async function buildLife(scene, opts = {}) {
 
   // ---------- per-frame update
   let night = 0, quality = 1, lastFence = null;
+  // road traffic: 'moving' = animated cars, 'parked' = only parked cars (static, rebuilt when the camera moves), 'off' = none
+  let roadMode = 'parked', lastPark = null;
   const pushFences = (cam) => {
     const fp = fpools.fence, bp = fpools.bale; fp.begin(); bp.begin();
     const R2 = (2600 * Math.max(0.5, quality)) ** 2;
@@ -872,7 +874,6 @@ export async function buildLife(scene, opts = {}) {
     const camAgl = cam.y - heightAt(cam.x, cam.z);
     // vehicles
     const vR = (2600 + Math.min(1500, camAgl * 1.5)) * (0.55 + 0.45 * quality); const vR2 = vR * vR;
-    for (const k in vpools) vpools[k].begin();
     let nl = 0; const lightsOn = night > 0.12; const lR2 = Math.min(vR2, 9000 * 9000);
     const addLights = (c, x, y, z, yaw) => {
       if (!lightsOn || nl > VL - 4) return;
@@ -882,6 +883,22 @@ export async function buildLife(scene, opts = {}) {
         lx = L[3]; lz = L[5] * s; vlPos[nl * 3] = x + cy * lx + sy * lz; vlPos[nl * 3 + 1] = y + L[4]; vlPos[nl * 3 + 2] = z - sy * lx + cy * lz; vlCol[nl * 3] = 1; vlCol[nl * 3 + 1] = 0.05; vlCol[nl * 3 + 2] = 0.02; vlSize[nl] = 0.8; nl++;
       }
     };
+    if (roadMode !== 'moving') {
+      // no animation: vehicle instances only change when the camera has moved a fair distance
+      if (!lastPark || lastPark.mode !== roadMode || Math.hypot(cam.x - lastPark.x, cam.z - lastPark.z) > 60) {
+        lastPark = { x: cam.x, z: cam.z, mode: roadMode };
+        for (const k in vpools) vpools[k].begin();
+        if (roadMode === 'parked') {
+          const pR2 = Math.min(vR2, 2500 * 2500);
+          for (const c of parked) { const dx = c.x - cam.x, dz = c.z - cam.z; if (dx * dx + dz * dz > pR2) continue; vpools[c.type].push(c.x, c.y, c.z, c.yaw, 0, 1, 0, 0, 0, 0, c.c1, c.c2, null); }
+        }
+        for (const k in vpools) vpools[k].end();
+        stats.visibleCars = Object.values(vpools).reduce((a, p) => a + p.n, 0);
+      }
+      vlGeo.setDrawRange(0, 0); vlPts.visible = false;
+    } else {
+    lastPark = null;
+    for (const k in vpools) vpools[k].begin();
     if (!candAt || Math.hypot(cam.x - candAt.x, cam.z - candAt.z) > 600) refreshCandidates(cam);
     let spawns = 0;
     for (const c of cars) {
@@ -900,6 +917,7 @@ export async function buildLife(scene, opts = {}) {
     vlGeo.setDrawRange(0, nl); if (nl) { vlGeo.attributes.position.needsUpdate = true; vlGeo.attributes.color.needsUpdate = true; vlGeo.attributes.size.needsUpdate = true; }
     vlMat.uniforms.uNight.value = night; vlPts.visible = lightsOn;
     stats.visibleCars = Object.values(vpools).reduce((a, p) => a + p.n, 0);
+    }
 
     // people
     ppl.begin();
@@ -991,6 +1009,8 @@ export async function buildLife(scene, opts = {}) {
     group, stats, update,
     setNight(n) { night = n; },
     setTrafficEnabled(enabled) { trafficEnabled = enabled; },
+    setRoadTraffic(mode) { roadMode = mode === 'off' || mode === 'moving' ? mode : 'parked'; lastPark = null; },
+    get roadTraffic() { return roadMode; },
     set quality(q) { quality = q; lastFence = null; },
     get quality() { return quality; },
     farms, roads: ROADS, turbines, boats, herds,

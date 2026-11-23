@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.123/Build/Cesium/Widgets/widgets.css" />
-<link rel="stylesheet" href="./src/style.css?v=20261123e" />
+<link rel="stylesheet" href="./src/style.css?v=20261123f" />
 <script src="https://cesium.com/downloads/cesiumjs/releases/1.123/Build/Cesium/Cesium.js"></script>
 <script type="importmap">
 { "imports": {
@@ -28,6 +28,7 @@
   <div id="topbar">
     <span id="viewName">COCKPIT</span>
     <span id="simRate" class="chip">1×</span>
+    <button id="perfChip" class="chip perfChip" type="button" title="Frame rate">-- FPS</button>
     <button id="gsChip" class="chip" type="button" title="Ground services (J)">GROUND SVC</button>
     <button id="failureChip" class="chip failureChip hidden" type="button">FAILURE: NONE</button>
     <span id="apChip" class="chip hidden">AP</span>
@@ -118,7 +119,11 @@
 
 <!-- help -->
 <div id="help" class="hidden panelBox">
-  <h2>Controls &amp; procedures</h2>
+  <div class="helpHead"><h2>Controls &amp; procedures</h2><span class="pausedTag">SIM PAUSED</span>
+    <nav class="helpTabs"><button type="button" class="helpTab on" data-tab="ref">Keys &amp; procedures</button><button type="button" class="helpTab" data-tab="ctl">Key bindings &amp; mouse</button></nav></div>
+  <p id="keyNote" class="ctlNote">Simulation paused while this window is open.</p>
+  <div id="ctlSettings" class="hidden"></div>
+  <div id="helpRef">
   <div class="cols">
     <section><h3>Primary flight controls</h3>
       <dl>
@@ -133,7 +138,7 @@
         <dt>P</dt><dd>Parking brake</dd>
         <dt>R</dt><dd>Call the fuel truck (ramp only, engine off, parking brake set)</dd>
         <dt>J / Shift+J</dt><dd>Open the ground services panel (fuel, power, passengers, baggage, catering, pushback) / cancel all</dd>
-        <dt>Y</dt><dd>Mouse-yoke mode on/off</dd>
+        <dt>Y</dt><dd>Mouse-yoke mode on/off · wheel = throttle · hold right button = rudder (tune it under Key bindings &amp; mouse)</dd>
         <dt>Gamepad</dt><dd>L-stick yoke, R-stick X rudder / Y throttle, LB/RB flaps, A brakes</dd>
       </dl></section>
     <section><h3>Engine, electrical, lights</h3>
@@ -161,7 +166,8 @@
         <dt>WASD (views 2, 7)</dt><dd>Walk around the cabin or the ramp</dd>
         <dt>M · N · U</dt><dd>Map · Mini-map · Data strip</dd>
         <dt>G</dt><dd>Open ATC and transmit readbacks</dd>
-        <dt>9 · Esc · ?</dt><dd>Sim rate · Pause/menu · This help</dd>
+        <dt>9 · Esc · ?</dt><dd>Sim rate · Pause/menu · This help (pauses the sim)</dd>
+        <dt>;</dt><dd>Detailed frame-rate stats (or click the FPS chip)</dd>
         <dt>Shift+F</dt><dd>Open failure and emergency-procedure panel</dd>
       </dl></section>
   </div>
@@ -169,7 +175,8 @@
   <p class="vref">Parking brake SET · Fuel selector BOTH · Fuel shutoff IN · Throttle open ¼ inch (W) · Mixture IDLE CUTOFF ([) · MASTER on (Shift+M) · BCN on · FUEL PUMP on · Mixture FULL RICH 3–5 s then IDLE CUTOFF · FUEL PUMP off · Key to START (hold I) · when it fires, Mixture RICH (]) · Oil pressure green within 30 s · AVIONICS on · Flaps UP. C152: mixture RICH, carb heat COLD, prime 2–3 strokes, throttle ½ inch, MASTER, START.</p>
   <h3>Reference numbers (C172S, 2,550 lb)</h3>
   <p class="vref">Vr 55 · Vx 62 · Vy 74 · Best glide 68 · Va 105 · Vfe 85 (FULL) / 110 (10°) · Vno 129 · Vne 163 · Vso 40 / Vs1 48 KIAS · Approach 65–70 (flaps 30) · Cruise 2,400 RPM ≈ 110 KTAS</p>
-  <button class="primary" id="helpClose">Close</button>
+  </div>
+  <button class="primary" id="helpClose">Close &amp; resume</button>
 </div>
 
 <!-- menu -->
@@ -250,6 +257,9 @@
         <input id="fuel" type="range" min="4" max="26" step="1" value="24" /></label>
       <label>Graphics
         <select id="quality"><option value="lite">Lite — low memory</option><option value="perf">Performance</option><option value="balanced" selected>Balanced</option><option value="high">High</option></select></label>
+      <label>Road traffic
+        <select id="roadTraffic"><option value="off">Off — fastest</option><option value="parked" selected>Parked cars only (no animation)</option><option value="moving">Moving traffic</option></select></label>
+      <label class="settingToggle"><input id="autoRes" type="checkbox" checked /> Auto resolution — lower render resolution when the frame rate drops</label>
       <label class="settingToggle"><input id="atcEnabled" type="checkbox" checked /> Realistic ATC communications</label>
       <label class="settingToggle"><input id="aiTraffic" type="checkbox" checked /> AI traffic</label>
       <label>Failure scenario
@@ -292,7 +302,7 @@ window.startEdition = function (mode) {
     window.chooseLoadMode(mode);
     return;
   }
-  import('./src/main.js?v=20261123e').then(() => {
+  import('./src/main.js?v=20261123f').then(() => {
     if (typeof window.chooseLoadMode === 'function') window.chooseLoadMode(mode);
     else if (text) text.textContent = 'Failed to load the flight simulator.';
   }).catch((error) => {
@@ -301,7 +311,7 @@ window.startEdition = function (mode) {
   });
 };
 </script>
-<script type="module" src="./src/main.js?v=20261123c"></script>
+<script type="module" src="./src/main.js?v=20261123f"></script>
 <script data-pplx-inline-edit>
 (function () {
   if (window === window.top) return;

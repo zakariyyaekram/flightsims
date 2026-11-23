@@ -425,17 +425,32 @@ export class Terrain {
     out.push(t);
   }
 
-  update(cam, agl, budgetMs = 7, force = false) {
+  // ahead: optional predicted camera position (direction of travel). Tiles needed there are queued after the
+  // ones needed now, so by the time the aircraft arrives they are already built.
+  update(cam, agl, budgetMs = 7, force = false, ahead = null) {
     this.frame++;
     const out = [];
     this.queue.clear();
     this.select(this.root, cam, agl, out);
     // build queued tiles closest first within budget
-    const q = [...this.queue].sort((a, b) => (a.size - b.size) * 0 + (Math.hypot(a.x - cam.x, a.z - cam.z) / a.size - Math.hypot(b.x - cam.x, b.z - cam.z) / b.size));
+    const key = (t, c) => Math.hypot(t.x - c.x, t.z - c.z) / t.size;
+    const q = [...this.queue].sort((a, b) => key(a, cam) - key(b, cam));
+    let pre = [];
+    if (ahead && !force && q.length < 4) {
+      this.queue.clear();
+      this.select(this.root, ahead, agl, []);
+      pre = [...this.queue].filter((t) => !t.mesh).sort((a, b) => key(a, ahead) - key(b, ahead));
+      this.prefetching = pre.length;
+    }
     const t0 = performance.now();
     for (const t of q) {
       if (!force && performance.now() - t0 > budgetMs) break;
       this.buildGeometry(t);
+    }
+    // prefetch gets at most half the budget
+    for (const t of pre) {
+      if (performance.now() - t0 > budgetMs * 0.5) break;
+      if (!t.mesh) this.buildGeometry(t);
     }
     // visibility
     for (const c of this.group.children.slice()) c.visible = false;
