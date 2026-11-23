@@ -565,15 +565,16 @@ export async function buildLife(scene, opts = {}) {
     for (let k = best; k >= 0 && k < n && L < 2500; k += dir) { raw.push([r.pts[k * 2], r.pts[k * 2 + 1], r.ys ? r.ys[k] : null]); if (raw.length > 1) { const a = raw[raw.length - 2], b = raw[raw.length - 1]; L += Math.hypot(b[0] - a[0], b[1] - a[1]); } }
     if (raw.length < 2 || L < 40) return null;
     const xs = [], zs = [], ys = [];
+    const lift = r.cls === 'street' && opts.flatStreets ? 0.06 : 0.32;
     for (let i = 0; i < raw.length - 1; i++) {
       const a = raw[i], b = raw[i + 1]; const d = norm2([b[0] - a[0], b[1] - a[1]]); const SL = Math.hypot(b[0] - a[0], b[1] - a[1]); const m = Math.max(1, Math.ceil(SL / 14));
       for (let j = 0; j < m; j++) {
         const t = j / m; const x = a[0] + (b[0] - a[0]) * t - d[1] * off, z = a[1] + (b[1] - a[1]) * t + d[0] * off;
-        xs.push(x); zs.push(z); ys.push(a[2] != null ? a[2] + (b[2] - a[2]) * t + 0.2 : Math.max(heightAt(x, z), 0.8) + 0.32);
+        xs.push(x); zs.push(z); ys.push(a[2] != null ? a[2] + (b[2] - a[2]) * t + 0.2 : Math.max(heightAt(x, z), 0.8) + lift);
       }
     }
     const e = raw[raw.length - 1], p = raw[raw.length - 2], d = norm2([e[0] - p[0], e[1] - p[1]]);
-    xs.push(e[0] - d[1] * off); zs.push(e[1] + d[0] * off); ys.push(e[2] != null ? e[2] + 0.2 : Math.max(heightAt(e[0], e[1]), 0.8) + 0.32);
+    xs.push(e[0] - d[1] * off); zs.push(e[1] + d[0] * off); ys.push(e[2] != null ? e[2] + 0.2 : Math.max(heightAt(e[0], e[1]), 0.8) + lift);
     return new Path(Float32Array.from(xs), Float32Array.from(zs), Float32Array.from(ys), false);
   };
   const kindOf = (r) => (r.cls === 'hwy' ? 'hwy' : r.cls === 'street' ? 'town' : townAt(r.pts[0], r.pts[1]) > 0.3 ? 'town' : 'rural');
@@ -641,7 +642,29 @@ export async function buildLife(scene, opts = {}) {
   const farmMat = lifeMaterial({ rough: 0.85, plank: true });
   const farms = [];
   const tooClose = (x, z, d) => farms.some((f) => Math.abs(f.x - x) < d && Math.abs(f.z - z) < d && Math.hypot(f.x - x, f.z - z) < d);
-  for (const r of ROADS) {
+  if (opts.realFarms) {
+    // real farmsteads (OSM farmyards) with their nearest real pasture: buildings come from the OSM footprints,
+    // here we only add the livestock, fences and hay bales
+    const fr = mulberry(4242);
+    for (const [px, pz, ang, meadow, yx, yz] of opts.realFarms) {
+      if (farms.length > 400) break;
+      const fx = Math.cos(ang), fz = Math.sin(ang), lx = -fz, lz = fx;
+      const pw = 60 + fr() * 40, pd = 45 + fr() * 35;
+      const pad = { cx: px, cz: pz, fx, fz, lx, lz, hw: pw / 2, hd: pd / 2 };
+      const hC = heightAt(px, pz); const gx = (heightAt(px + 10, pz) - heightAt(px - 10, pz)) / 20, gz = (heightAt(px, pz + 10) - heightAt(px, pz - 10)) / 20;
+      pad.h = (X, Z) => hC + gx * (X - px) + gz * (Z - pz);
+      const farm = { x: yx, z: yz, items: [], pad, animals: [], bales: [], drive: null };
+      const kind = fr();
+      farm.species = !padOK(pad) ? null : kind < (meadow ? 0.6 : 0.4) ? 'cow' : kind < 0.75 ? 'sheep' : kind < 0.9 ? 'horse' : null;
+      if (farm.species) {
+        const n = farm.species === 'cow' ? 8 + Math.floor(fr() * 16) : farm.species === 'sheep' ? 12 + Math.floor(fr() * 20) : 3 + Math.floor(fr() * 5);
+        const breed = fr();
+        for (let k = 0; k < n; k++) farm.animals.push(newAnimal(fr, farm.species, pad, breed));
+      }
+      if (fr() < 0.5) { const cx = yx + (px - yx) * 0.4, cz = yz + (pz - yz) * 0.4; for (let k = 0; k < 5 + fr() * 8; k++) { const bx = cx + (fr() - 0.5) * 30, bz = cz + (fr() - 0.5) * 30; if (roadNear(bx, bz, 6)) continue; farm.bales.push([bx, heightAt(bx, bz), bz, fr() * TAU]); } }
+      farms.push(farm);
+    }
+  } else for (const r of ROADS) {
     if (r.cls !== 'road' || r.len < 1200 || farms.length > 320) continue;
     if (townAt(r.pts[0], r.pts[1]) > 0.1) continue;
     const fr = mulberry(r.pts.length * 9973 + (r.pts[0] | 0));
@@ -743,6 +766,7 @@ export async function buildLife(scene, opts = {}) {
   {
     const Pp = [], I = [];
     for (const f of farms) {
+      if (!f.drive) continue;
       const [A, B] = f.drive; const L = Math.hypot(B.x - A.x, B.z - A.z); const n = Math.max(2, Math.ceil(L / 6));
       const dx = (B.x - A.x) / L, dz = (B.z - A.z) / L; const base = Pp.length / 3;
       for (let i = 0; i <= n; i++) { const x = A.x + (B.x - A.x) * i / n, z = A.z + (B.z - A.z) * i / n; for (const s of [-1, 1]) { const px = x - dz * 2.2 * s, pz = z + dx * 2.2 * s; Pp.push(px, heightAt(px, pz) + 0.1, pz); } }

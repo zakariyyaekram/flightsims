@@ -8,7 +8,7 @@
 import { fbm, simplex } from './noise.js';
 
 const DATA = new URL('../data/', import.meta.url);
-const DV = '?v=20261120';
+const DV = '?v=20261123a';
 const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 async function json(name) { const r = await fetch(new URL(name + DV, DATA)); if (!r.ok) throw new Error('missing ' + name); return r.json(); }

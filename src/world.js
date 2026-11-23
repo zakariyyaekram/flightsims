@@ -326,6 +326,7 @@ export class Forest {
       if (surfaceAt(wx, wz, h) !== 'grass') continue;
       // avoid town
       if (townAt(wx, wz) > 0.35) continue;
+      if (this.reject && this.reject(wx, wz)) continue;
       const ht = 9 + rnd() * 16 * (h > 900 ? 0.7 : 1);
       tmp.position.set(wx, h - 0.3, wz); tmp.rotation.set(0, rnd() * 6.28, 0); tmp.scale.set(ht * (0.9 + rnd() * 0.3), ht, ht * (0.9 + rnd() * 0.3)); tmp.updateMatrix();
       c.push(tmp.matrix.clone());
