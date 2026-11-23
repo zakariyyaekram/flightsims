@@ -2,7 +2,7 @@
 // are painted from the baked land-cover raster, roads and runways are drawn as vectors on top,
 // with airports, navaids, ILS feathers, place labels, your aircraft and live AI traffic.
 import { AIRPORTS, NAVAIDS, WORLD, RASTER, ROADS, TOWNS, WATER_NAMES, PLACES, TALL, WORLD_HALF } from './geo.js';
-import { ILS } from './avionics.js?v=20261123a';
+import { ILS } from './avionics.js?v=20261123c';
 
 const FT = 0.3048;
 const EXT = Math.max(WORLD.x1 - WORLD.x0, WORLD.z1 - WORLD.z0) / 2;
@@ -134,6 +134,14 @@ export class MovingMap {
       const bx = i.thr.x - Math.sin(c) * L, bz = i.thr.z + Math.cos(c) * L;
       g.fillStyle = 'rgba(150,40,120,0.12)'; g.beginPath(); g.moveTo(i.thr.x, i.thr.z); g.lineTo(bx + Math.cos(c) * off, bz + Math.sin(c) * off); g.lineTo(bx - Math.cos(c) * off, bz - Math.sin(c) * off); g.closePath(); g.fill();
       g.strokeStyle = 'rgba(140,30,110,0.75)'; g.lineWidth = 1.3 * mpp; g.beginPath(); g.moveTo(i.thr.x, i.thr.z); g.lineTo(bx, bz); g.stroke();
+    }
+    // taxi route (ramp -> hold short)
+    const tx = sim.taxi;
+    if (tx && tx.show && tx.route) {
+      const P = tx.route.pts;
+      g.strokeStyle = 'rgba(0,0,0,0.45)'; g.lineWidth = Math.max(9, 5.5 * mpp); g.beginPath(); P.forEach((p, i) => (i ? g.lineTo(p.x, p.z) : g.moveTo(p.x, p.z))); g.stroke();
+      g.strokeStyle = '#ff2bd6'; g.lineWidth = Math.max(5, 3.2 * mpp); g.beginPath(); P.forEach((p, i) => (i ? g.lineTo(p.x, p.z) : g.moveTo(p.x, p.z))); g.stroke();
+      const hp = P[P.length - 1]; g.fillStyle = '#ffd400'; g.strokeStyle = '#000'; g.lineWidth = Math.max(2, mpp); g.beginPath(); g.arc(hp.x, hp.z, Math.max(14, 6 * mpp), 0, Math.PI * 2); g.fill(); g.stroke();
     }
     // track
     if (this.track.length > 1) {

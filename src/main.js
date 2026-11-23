@@ -1,23 +1,25 @@
 // Skyhawk — main loop, cameras, input, UI.
 import * as THREE from 'three';
-import { FDM, KT, FT, C172, C152 } from './fdm.js?v=20261123a';
+import { FDM, KT, FT, C172, C152 } from './fdm.js?v=20261123c';
 import { qrot } from './math.js';
 import { groundQuery, heightAt, AIRPORTS, NAVAIDS, fromLocal, toLocal, WATER_LEVEL, findRunway, runwayEnd, inWorld, waterFrac, ll2w } from './geo.js';
-import { createTerrainMaterial, Terrain } from './terrain.js?v=20261123a';
-import { GroundOverlay } from './ground.js?v=20261123a';
-import { GrassBlades, CropField } from './blades.js?v=20261123a';
-import { buildAircraft, animateAircraft } from './aircraft.js?v=20261123a';
-import { Panel } from './panel.js?v=20261123a';
-import { Avionics, ILS } from './avionics.js?v=20261123a';
+import { createTerrainMaterial, Terrain } from './terrain.js?v=20261123c';
+import { GroundOverlay } from './ground.js?v=20261123c';
+import { GrassBlades, CropField } from './blades.js?v=20261123c';
+import { buildAircraft, animateAircraft } from './aircraft.js?v=20261123c';
+import { Panel } from './panel.js?v=20261123c';
+import { Avionics, ILS } from './avionics.js?v=20261123c';
 import { Environment } from './env.js';
 import { buildAirports, RockField, Forest, GrassField } from './world.js';
-import { Scenery } from './scenery.js?v=20261123a';
-import { Traffic } from './traffic.js?v=20261123a';
-import { buildLife } from './life.js?v=20261123a';
-import { MovingMap } from './map.js?v=20261123a';
+import { Scenery } from './scenery.js?v=20261123c';
+import { Traffic } from './traffic.js?v=20261123c';
+import { buildLife } from './life.js?v=20261123c';
+import { MovingMap } from './map.js?v=20261123c';
+import { departureRoute, routeProgress } from './taxi.js?v=20261123c';
+import { Checklist } from './checklist.js?v=20261123c';
 import { Sound } from './audio.js';
 import { setAniso } from './textures.js';
-import { ATC } from './atc.js?v=20261123a';
+import { ATC } from './atc.js?v=20261123c';
 import { initCesium, syncCesiumCamera, getCesiumElevationWorld, warmCesiumTerrain } from './cesium.js?v=20261120';
 
 const $ = (id) => document.getElementById(id);
@@ -243,7 +245,7 @@ async function init() {
     }
   }
   progress(0.92, 'Adding vehicles and airport activity…');
-  const realFarms = ground ? await fetch('./data/farms.json?v=20261123a').then((r) => r.json()).catch(() => null) : null;
+  const realFarms = ground ? await fetch('./data/farms.json?v=20261123c').then((r) => r.json()).catch(() => null) : null;
   life = await buildLife(scene, { cars: loadMode === 'light' ? 160 : 380, streets: scenery ? (x, z, r) => scenery.streetsNear(x, z, r) : null, realFarms, flatStreets: !!ground });
   if (loadMode === 'light') life.quality = 0.55;
   sim.life = life;
@@ -333,13 +335,11 @@ function applySetup(s, warmOnly = false) {
   lastSetup = s;
   sim.groundServices = { active: false, airport: null };
   sim.fdm.setAircraft(s.aircraftType === 'C152' ? C152 : C172);
-  sim.atc.reset(s);
   sim.atc.enabled = s.atcEnabled !== false;
   sim.atc.trafficEnabled = s.aiTraffic !== false;
   sim.aiTrafficEnabled = s.aiTraffic !== false;
   if (life) life.setTrafficEnabled(sim.aiTrafficEnabled);
   if (traffic) traffic.setEnabled(sim.aiTrafficEnabled !== false);
-  sim.av.com1.active = sim.atc.frequency;
   const F = sim.fdm;
   sim.weather = { windDir: s.windDir, windKt: s.windKt, turb: s.turb, cover: s.cover, baseFt: s.baseFt, visKm: s.visKm, qnhInHg: s.qnhInHg, isa: s.isa };
   sim.timeOfDay = s.tod;
@@ -360,14 +360,30 @@ function applySetup(s, warmOnly = false) {
   const rwyStart = (icao, id) => { const f = findRunway(icao, id); const e = runwayEnd(f.r, f.e); const k = (f.r.disp[f.e] || 0) - 35; return { p: { x: e.x - e.dir[0] * k, z: e.z - e.dir[1] * k }, hdg: e.hdg }; };
   let flapsInit = 0;
   const SP = { SFO28: ['KSFO', '28L'], SFO28L: ['KSFO', '28L'], SFO1R: ['KSFO', '1R'], OAK30: ['KOAK', '30'], OAK12: ['KOAK', '12'], OAK28R: ['KOAK', '28R'], SJC30: ['KSJC', '30L'], HWD28: ['KHWD', '28L'], SQL30: ['KSQL', '30'], PAO31: ['KPAO', '31'], LVK25: ['KLVK', '25R'], CCR32: ['KCCR', '32R'], RHV31: ['KRHV', '31R'], APC36: ['KAPC', '19R'], HAF30: ['KHAF', '30'], NUQ32: ['KNUQ', '32R'], DVO31: ['KDVO', '31'], O69: ['KO69', '29'] };
-  if (SP[s.spawn]) { const r = rwyStart(...SP[s.spawn]); pos = r.p; hdg = r.hdg; }
+  if (s.spawn === 'SFOramp') s.spawn = 'SFO28'; // older saved menu value
+  sim.taxi = null;
+  if (SP[s.spawn]) {
+    // parked on the general-aviation ramp, cold & dark; taxi route to the departure runway over the real taxiways
+    const [icao, rw] = SP[s.spawn], a = airport(icao);
+    pos = { x: a.ramp.x, z: a.ramp.z }; hdg = a.ramp.hdg; cold = true;
+    const route = departureRoute(icao, rw, pos.x, pos.z);
+    if (route) {
+      sim.taxi = { route, show: true, icao };
+      // nose toward the first leg of the route so the taxi starts straight ahead
+      const t = route.pts.find((p) => Math.hypot(p.x - pos.x, p.z - pos.z) > 30) || route.pts[route.pts.length - 1];
+      hdg = (Math.atan2(t.x - pos.x, -(t.z - pos.z)) / D2R + 360) % 360;
+    }
+    s.depRwy = route ? route.rwy : rw; s.taxiVia = route ? route.viaText : null; s.ramp = true;
+  }
   else switch (s.spawn) {
-    case 'SFOramp': { const a = airport('KSFO'); pos = { x: a.ramp.x, z: a.ramp.z }; hdg = a.ramp.hdg; cold = true; break; }
+    case 'SFO28rwy': { const r = rwyStart('KSFO', '28L'); pos = r.p; hdg = r.hdg; break; }
     case 'ILS28': { const i = ILS.find((x) => x.ident === 'ISFO') || ILS[0]; const d = 8 * 1852; const c = i.course * D2R; pos = { x: i.thr.x - Math.sin(c) * d, z: i.thr.z + Math.cos(c) * d }; hdg = i.course; onGround = false; speed = 95; alt = Math.max(3000 * FT + (s.qnhInHg - 29.92) * 1000 * FT, i.elev + Math.tan(3 * D2R) * d + 30); pitch = 2; break; }
     case 'cruise': { pos = ll2w(37.70, -122.30); hdg = 320; onGround = false; speed = 108; alt = 4500 * FT; pitch = 1.5; break; }
     case 'GG': { pos = ll2w(37.79, -122.40); hdg = 300; onGround = false; speed = 100; alt = 1500 * FT; pitch = 1; break; }
     default: { const r = rwyStart('KSFO', '28L'); pos = r.p; hdg = r.hdg; }
   }
+  sim.atc.reset(s);
+  sim.av.com1.active = sim.atc.frequency;
   const localGh = heightAt(pos.x, pos.z);
   const cesiumGh = getCesiumElevationWorld(pos.x, pos.z);
   const gh = Number.isFinite(cesiumGh) ? cesiumGh : localGh;
@@ -393,7 +409,7 @@ function applySetup(s, warmOnly = false) {
   av.ap.on = false; av.ap.discAlert = 0;
   av.hdgBug = Math.round(hdg);
   { // tune NAV1 to the ILS of the departure / approach runway when it has one, else the nearest VOR
-    const code = SP[s.spawn] || (s.spawn === 'ILS28' || s.spawn === 'SFOramp' ? ['KSFO', '28L'] : null);
+    const code = SP[s.spawn] ? [SP[s.spawn][0], s.depRwy || SP[s.spawn][1]] : (s.spawn === 'ILS28' || s.spawn === 'SFO28rwy' ? ['KSFO', '28L'] : null);
     const il = code ? ILS.find((i) => i.airport.icao === code[0] && i.rwy === code[1]) || ILS.find((i) => i.airport.icao === code[0]) : null;
     let vor = null, bd = 1e12; for (const n of NAVAIDS) if (n.type === 'VOR') { const d = Math.hypot(n.x - pos.x, n.z - pos.z); if (d < bd) { bd = d; vor = n; } }
     if (il) { av.nav1.active = il.freq; av.nav1.obs = Math.round(il.course); if (vor) av.nav1.standby = vor.freq; }
@@ -423,6 +439,8 @@ function applySetup(s, warmOnly = false) {
   }
   if (grass) grass.update(cam, F.pos[1] - gh);
   if (scenery) for (let i = 0; i < 40; i++) scenery.update(cam);
+  sim.checklist?.reset(s.aircraftType);
+  buildTaxiLine();
   syncAircraft(0);
   void warmOnly;
 }
@@ -548,7 +566,7 @@ window.addEventListener('keydown', (e) => {
     case 'KeyK': F.kollsman = Math.round(sim.weather.qnhInHg * 100) / 100; toast('Altimeter ' + F.kollsman.toFixed(2)); break;
     case 'KeyD': if (!walkView()) { F.gyro.hiDrift = ((F.attitude.hdg - F.gyro.compass + 540) % 360) - 180; toast('Heading indicator set to compass'); } break;
     case 'KeyA': if (!walkView() && !sh) { const wl = !!F.aircraft.apRollOnly; if (!F.eff?.ap) { toast(wl ? 'Wing leveler has no power (AVIONICS switch / AUTOPILOT breaker)' : 'Autopilot has no power (AVIONICS BUS 2 / AUTOPILOT breaker)'); break; } av.apButton('AP', F); toast(av.ap.on ? (wl ? 'Wing leveler ENGAGED (LVL) — you still fly pitch' : 'Autopilot ENGAGED (ROL/VS)') : (wl ? 'Wing leveler' : 'Autopilot') + ' DISCONNECTED'); } else if (sh && !walkView()) { /* reserved */ } break;
-    case 'KeyH': if (sh) { av.apButton('HDG', F); toast('AP ' + av.ap.lat); } break;
+    case 'KeyH': if (sh) { av.apButton('HDG', F); toast('AP ' + av.ap.lat); } else sim.checklist?.toggle(); break;
     case 'KeyN': if (sh) { av.apButton('NAV', F); toast('AP ' + av.ap.lat); } else { $('mini').classList.toggle('hidden'); } break;
     case 'KeyR':
       if (sh) { av.apButton('APR', F); toast('AP ' + av.ap.lat + (av.ap.gsArmed ? ' (GS armed)' : '')); }
@@ -571,7 +589,7 @@ window.addEventListener('keydown', (e) => {
         }
       }
       break;
-    case 'KeyT': if (sh) { av.apButton('ALT', F); toast('AP ' + av.ap.vert); } break;
+    case 'KeyT': if (sh) { av.apButton('ALT', F); toast('AP ' + av.ap.vert); } else toggleTaxiLine(); break;
     case 'KeyY': mouse.yoke = !mouse.yoke; $('yokeChip').classList.toggle('hidden', !mouse.yoke); $('cross').classList.toggle('hidden', !mouse.yoke); toast(mouse.yoke ? 'Mouse yoke ON — mouse position = yoke' : 'Mouse yoke OFF'); break;
     case 'KeyG': toggleATC(); break;
     case 'KeyU': $('strip').classList.toggle('hidden'); break;
@@ -994,7 +1012,7 @@ $('fly').onclick = () => {
   showMenu(false); $('hud').classList.remove('hidden'); $('crash').classList.add('hidden');
   sim.started = true; sim.panelDirty = true; togglePause(false);
   setView(sim.view === 'walk' ? 'cockpit' : sim.view);
-  toast(readSetup().spawn === 'SFOramp' ? 'Cold & dark. Shift+E auto-start, or run the checklist on the panel. ? for help.' : 'Press ? for controls.  Mixture, trim and flaps are yours.', 4000);
+  toast(sim.fdm.eng.running ? 'Press ? for controls.  Mixture, trim and flaps are yours.' : `Parked cold & dark${sim.taxi ? ' — taxi to Rwy ' + sim.taxi.route.rwy + ' via ' + sim.taxi.route.viaText : ''}. Press H for the checklist and engine-start guide, T for the taxi line.`, 7000);
   canvas.focus?.();
 };
 $('showHelp').onclick = () => $('help').classList.remove('hidden');
@@ -1028,6 +1046,8 @@ function frame(dtReal) {
     sim.apCmd = sim.av.update(F, dt * sim.simRate, powered);
     physics(dt);
     sim.atc.update(sim, dt * sim.simRate);
+    sim.checklist?.update(dt);
+    updateTaxiGuide(dt);
     simT += dt * sim.simRate;
     sim.timeOfDay = (lastSetup?.tod ?? 10) + simT / 3600;
     if (F.crashed && !sim.crashShown) { sim.crashShown = true; $('crashWhy').textContent = F.crashed; $('crash').classList.remove('hidden'); }
@@ -1035,7 +1055,9 @@ function frame(dtReal) {
   }
   const t = performance.now() / 1000;
   syncAircraft(dt, t);
+  animateLookTo(dt);
   updateCamera(dt, t);
+  updateHighlight(t);
   if (sim.camOverride) { const o = sim.camOverride; camera.position.set(o.p[0], o.p[1], o.p[2]); camera.lookAt(o.t[0], o.t[1], o.t[2]); }
   camPos.copy(camera.position);
   // world streaming
@@ -1079,6 +1101,141 @@ function frame(dtReal) {
   frames++; fpsT += dtReal; if (fpsT > 0.5) { fpsVal = frames / fpsT; frames = 0; fpsT = 0; if (!$('fps').classList.contains('hidden')) $('fps').textContent = `${fpsVal.toFixed(0)} fps\n${renderer.info.render.calls} calls\n${(renderer.info.render.triangles / 1e6).toFixed(2)} M tris${terrain ? `\ntiles ${terrain.visibleCount}` : ''}`; }
 }
 sim.frame = frame;
+
+// ---------------- help: checklists, "show me", taxi line ----------------
+sim.toast = toast;
+// pulsing marker that shows where a control is (works for panel switches and 3D knobs/levers)
+const hlSprite = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
+  g.strokeStyle = '#ffd600'; g.lineWidth = 10; g.shadowColor = '#ffd600'; g.shadowBlur = 16; g.beginPath(); g.arc(64, 64, 46, 0, Math.PI * 2); g.stroke();
+  const m = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, depthWrite: false, transparent: true });
+  const sp = new THREE.Sprite(m); sp.renderOrder = 999; sp.visible = false; return sp;
+})();
+var hlUntil = 0, hlSize = 0.05, lookTo = null;
+function showControl(id, fromGuide = false) {
+  if (!sim.panel || !aircraft) return false;
+  if (sim.view !== 'cockpit' && sim.view !== 'cabin') setView('cockpit');
+  syncAircraft(0); aircraft.updateMatrixWorld(true);
+  const L = sim.panel.locate(id); if (!L) { if (!fromGuide) toast('That control is not on this panel'); return false; }
+  const F = sim.fdm, q = new THREE.Quaternion(F.q[0], F.q[1], F.q[2], F.q[3]);
+  const d = L.world.clone().sub(new THREE.Vector3(F.pos[0], F.pos[1], F.pos[2])).applyQuaternion(q.clone().invert()).sub(EYE);
+  const len = d.length() || 1;
+  lookTo = { yaw: clamp(Math.atan2(-d.z, d.x) / D2R, -170, 170), pitch: clamp(Math.asin(d.y / len) / D2R, -80, 70) };
+  if (!hlSprite.parent) scene.add(hlSprite);
+  hlSprite.position.copy(L.world); hlSize = L.canvas ? Math.max(0.03, L.canvas[2] / 1900 * 2.4) : Math.max(0.035, L.size || 0.05);
+  hlUntil = performance.now() + 6000; hlSprite.visible = true;
+  if (L.canvas) sim.panel.hl = { x: L.canvas[0], y: L.canvas[1], r: L.canvas[2], until: performance.now() + 6000 };
+  sim.panelDirty = true;
+  return true;
+}
+sim.showControl = showControl;
+function animateLookTo(dt) {
+  if (!lookTo) return;
+  const k = Math.min(1, dt * 5);
+  look.yaw += (lookTo.yaw - look.yaw) * k; look.pitch += (lookTo.pitch - look.pitch) * k;
+  if (Math.abs(lookTo.yaw - look.yaw) < 0.2 && Math.abs(lookTo.pitch - look.pitch) < 0.2) lookTo = null;
+}
+function updateHighlight(t) {
+  if (!hlSprite.visible) return;
+  if (performance.now() > hlUntil || !(sim.view === 'cockpit' || sim.view === 'cabin')) { hlSprite.visible = false; return; }
+  const s = hlSize * (1 + 0.18 * Math.sin(t * 7)); hlSprite.scale.set(s, s, s);
+}
+const checklist = new Checklist(sim, showControl); sim.checklist = checklist;
+$('cklBtn').onclick = () => checklist.toggle();
+// stop the look-around drag from starting when using the checklist / buttons
+for (const id of ['ckl', 'cklBtn', 'taxiBtn']) $(id).addEventListener('mousedown', (e) => e.stopPropagation());
+
+// magenta taxi line painted on the real taxiways from the ramp to the hold-short point
+var taxiLine = null; // var: applySetup may run before this line during load
+function buildTaxiLine() {
+  if (taxiLine) { scene.remove(taxiLine); taxiLine.traverse((o) => { o.geometry?.dispose(); }); taxiLine = null; }
+  $('taxiBtn').classList.toggle('hidden', !sim.taxi); $('taxiChip').classList.add('hidden');
+  if (!sim.taxi) return;
+  const P = sim.taxi.route.pts, pts = [];
+  for (let k = 1; k < P.length; k++) { const a = P[k - 1], b = P[k], L = Math.hypot(b.x - a.x, b.z - a.z), n = Math.max(1, Math.ceil(L / 4)); for (let i = k === 1 ? 0 : 1; i <= n; i++) pts.push({ x: a.x + (b.x - a.x) * i / n, z: a.z + (b.z - a.z) * i / n }); }
+  const yOf = (x, z) => groundQuery(x, z).h + 0.07;
+  const pos = [], idx = [], W = 0.45;
+  pts.forEach((p, i) => {
+    const q = pts[Math.min(i + 1, pts.length - 1)], o = pts[Math.max(i - 1, 0)]; let dx = q.x - o.x, dz = q.z - o.z; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+    const y = yOf(p.x, p.z); pos.push(p.x - dz * W, y, p.z + dx * W, p.x + dz * W, y, p.z - dx * W);
+    if (i) { const j = i * 2; idx.push(j - 2, j - 1, j, j - 1, j + 1, j); }
+  });
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setIndex(idx);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xff2bd6, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, depthWrite: false, transparent: true, opacity: 0.92 });
+  taxiLine = new THREE.Group(); taxiLine.add(new THREE.Mesh(geo, mat));
+  // direction chevrons every ~16 m
+  const cpos = [];
+  let acc = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i]; acc += Math.hypot(b.x - a.x, b.z - a.z); if (acc < 16) continue; acc = 0;
+    let dx = b.x - a.x, dz = b.z - a.z; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l; const y = yOf(b.x, b.z) + 0.01;
+    const tip = [b.x + dx * 1.6, y, b.z + dz * 1.6], l0 = [b.x - dz * 1.3 - dx * 0.6, y, b.z + dx * 1.3 - dz * 0.6], r0 = [b.x + dz * 1.3 - dx * 0.6, y, b.z - dx * 1.3 - dz * 0.6];
+    cpos.push(...tip, ...l0, ...r0);
+  }
+  if (cpos.length) { const cg = new THREE.BufferGeometry(); cg.setAttribute('position', new THREE.Float32BufferAttribute(cpos, 3)); taxiLine.add(new THREE.Mesh(cg, new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -6, depthWrite: false }))); }
+  // hold-short marker: yellow bar across the route at the end
+  { const e = pts[pts.length - 1], o = pts[Math.max(0, pts.length - 3)]; let dx = e.x - o.x, dz = e.z - o.z; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l; const y = yOf(e.x, e.z) + 0.02;
+    const bar = new THREE.Mesh(new THREE.PlaneGeometry(14, 1.2).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffd400, polygonOffset: true, polygonOffsetFactor: -6, depthWrite: false }));
+    bar.position.set(e.x, y, e.z); bar.rotation.y = -Math.atan2(dz, dx) + Math.PI / 2; taxiLine.add(bar); }
+  taxiLine.renderOrder = 2; taxiLine.traverse((o) => { o.renderOrder = 2; }); taxiLine.visible = sim.taxi.show;
+  taxiLine.userData.snapped = false;
+  scene.add(taxiLine); snapTaxiLine();
+  $('taxiBtn').classList.toggle('on', sim.taxi.show);
+}
+// The OSM apron / taxiway meshes are triangulated polygons, so their surface is not exactly the terrain height
+// under every point. Once those meshes exist, drop every vertex of the guide line onto the real pavement surface.
+var snapRay = null;
+function snapTaxiLine() {
+  if (!taxiLine || taxiLine.userData.snapped) return;
+  const pave = []; scene.traverse((o) => { if (o.isMesh && o.userData.pave) pave.push(o); });
+  if (!pave.length) return;
+  snapRay = snapRay || new THREE.Raycaster(); const down = new THREE.Vector3(0, -1, 0), org = new THREE.Vector3();
+  let hits = 0;
+  // the pavement hit closest to the terrain-based height (ignores bridges / stacked polygons)
+  const nearHit = (y0) => { let best = null; for (const h of snapRay.intersectObjects(pave, false)) if (Math.abs(h.point.y - y0) < 2.5 && (!best || Math.abs(h.point.y - y0) < Math.abs(best.point.y - y0))) best = h; return best; };
+  taxiLine.traverse((o) => {
+    if (!o.isMesh) return; const pa = o.geometry.attributes.position;
+    if (!pa) return;
+    if (o.geometry.type === 'PlaneGeometry') {
+      org.set(o.position.x, o.position.y + 30, o.position.z); snapRay.set(org, down); snapRay.far = 60;
+      const h = nearHit(o.position.y - 0.09); if (h) { o.position.y = Math.max(o.position.y, h.point.y + 0.09); hits++; }
+      return;
+    }
+    for (let i = 0; i < pa.count; i++) {
+      org.set(pa.getX(i), pa.getY(i) + 30, pa.getZ(i)); snapRay.set(org, down); snapRay.far = 60;
+      const h = nearHit(pa.getY(i) - 0.08); if (h) { pa.setY(i, Math.max(pa.getY(i), h.point.y + 0.08)); hits++; }
+    }
+    pa.needsUpdate = true; o.geometry.computeBoundingSphere();
+  });
+  if (hits) taxiLine.userData.snapped = true;
+}
+function toggleTaxiLine() {
+  if (!sim.taxi) { toast('No taxi route here — taxi lines are drawn from the GA ramp to the departure runway'); return; }
+  sim.taxi.show = !sim.taxi.show; if (taxiLine) taxiLine.visible = sim.taxi.show;
+  $('taxiBtn').classList.toggle('on', sim.taxi.show); $('taxiChip').classList.toggle('hidden', !sim.taxi.show);
+  toast(sim.taxi.show ? `Taxi line ON — Rwy ${sim.taxi.route.rwy} via ${sim.taxi.route.viaText}` : 'Taxi line OFF');
+}
+$('taxiBtn').onclick = toggleTaxiLine;
+var taxiT = 0;
+function updateTaxiGuide(dt) {
+  const tx = sim.taxi; if (!tx) return;
+  taxiT += dt; if (taxiT < 0.4) return; taxiT = 0;
+  snapTaxiLine();
+  const F = sim.fdm, chip = $('taxiChip');
+  if (!F.onGround || tx.done) { chip.classList.add('hidden'); return; }
+  const p = routeProgress(tx.route, F.pos[0], F.pos[2]);
+  const brg = (Math.atan2(p.tgt.x - F.pos[0], -(p.tgt.z - F.pos[2])) / D2R + 360) % 360;
+  const rel = ((brg - F.attitude.hdg + 540) % 360) - 180;
+  const turn = Math.abs(rel) < 12 ? 'ahead' : rel < 0 ? `turn left ${Math.round(-rel)}°` : `turn right ${Math.round(rel)}°`;
+  const distTxt = p.rem > 1000 ? (p.rem / 1852).toFixed(1) + ' NM' : Math.round(p.rem / 0.3048 / 10) * 10 + ' ft';
+  if (p.rem < 35) {
+    chip.textContent = `HOLD SHORT RWY ${tx.route.rwy}`;
+    if (!tx.holdToast) { tx.holdToast = true; toast(`Hold short of runway ${tx.route.rwy}. Set the parking brake and run the "Before takeoff" checklist (H), then call the tower (G).`, 8000); }
+  } else chip.textContent = `TAXI RWY ${tx.route.rwy} · ${distTxt} · ${p.off > 25 ? 'off route — ' : ''}${turn}`;
+  chip.classList.toggle('hidden', !tx.show);
+  // once lined up on the runway, the route is finished
+  if (p.rem < 35 && Math.hypot(F.vel[0], F.vel[2]) > 15) { tx.done = true; tx.show = false; if (taxiLine) taxiLine.visible = false; chip.classList.add('hidden'); $('taxiBtn').classList.remove('on'); }
+}
 function loop() {
   const now = performance.now(); const dt = (now - last) / 1000; last = now;
   if (sim.ready && !MANUAL) frame(dt);

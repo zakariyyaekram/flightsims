@@ -34,6 +34,9 @@
     <span id="pauseChip" class="chip warn hidden">PAUSED</span>
     <span id="yokeChip" class="chip hidden">MOUSE YOKE</span>
     <span id="imcChip" class="chip hidden">IMC</span>
+    <button id="cklBtn" class="chip helpChip" type="button" title="Checklists and engine-start guide (H)">CHECKLIST · H</button>
+    <button id="taxiBtn" class="chip helpChip hidden" type="button" title="Show / hide the taxi line to the runway (T)">TAXI LINE · T</button>
+    <span id="taxiChip" class="chip hidden"></span>
   </div>
   <div id="strip">
     <div><b id="dIas">0</b><i>KIAS</i></div>
@@ -52,6 +55,19 @@
     <div><b id="dWind">—</b><i>WIND</i></div>
   </div>
   <canvas id="mini" width="440" height="440" aria-label="Mini map"></canvas>
+  <aside id="ckl" class="hidden" aria-label="Checklist">
+    <header>
+      <div><span class="atcEyebrow">CESSNA POH · NORMAL PROCEDURES</span>
+        <select id="cklTabs" aria-label="Checklist phase"></select></div>
+      <button id="cklClose" type="button" aria-label="Close checklist">×</button>
+    </header>
+    <div class="cklActions">
+      <button id="cklGuide" type="button" class="primary">How to start the engine — guide me</button>
+      <button id="cklReset" type="button">Reset</button>
+    </div>
+    <ol id="cklList"></ol>
+    <p id="cklHint"></p>
+  </aside>
   <aside id="atcPanel" class="hidden" aria-label="Air traffic control">
     <header>
       <div>
@@ -124,6 +140,8 @@
         <dt>I / Shift+I</dt><dd>Ignition key → START / → OFF (hold I at START)</dd>
         <dt>Shift+M</dt><dd>Master BAT + ALT</dd>
         <dt>Shift+V</dt><dd>Avionics bus</dd>
+        <dt>H</dt><dd>Checklists (Cessna POH normal procedures) &amp; the guided engine start. "Show" turns your head to the control and rings it in yellow</dd>
+        <dt>T</dt><dd>Taxi line: magenta line on the real taxiways from the GA ramp to the runway hold-short bar</dd>
         <dt>Shift+E</dt><dd>Auto-start (runs the starting checklist for you)</dd>
         <dt>L / Shift+L</dt><dd>Landing / taxi light</dd>
         <dt>O / Shift+O</dt><dd>Strobes / nav lights</dd>
@@ -146,6 +164,8 @@
         <dt>Shift+F</dt><dd>Open failure and emergency-procedure panel</dd>
       </dl></section>
   </div>
+  <h3>Cold &amp; dark start (172S, fuel injected — POH Section 4)</h3>
+  <p class="vref">Parking brake SET · Fuel selector BOTH · Fuel shutoff IN · Throttle open ¼ inch (W) · Mixture IDLE CUTOFF ([) · MASTER on (Shift+M) · BCN on · FUEL PUMP on · Mixture FULL RICH 3–5 s then IDLE CUTOFF · FUEL PUMP off · Key to START (hold I) · when it fires, Mixture RICH (]) · Oil pressure green within 30 s · AVIONICS on · Flaps UP. C152: mixture RICH, carb heat COLD, prime 2–3 strokes, throttle ½ inch, MASTER, START.</p>
   <h3>Reference numbers (C172S, 2,550 lb)</h3>
   <p class="vref">Vr 55 · Vx 62 · Vy 74 · Best glide 68 · Va 105 · Vfe 85 (FULL) / 110 (10°) · Vno 129 · Vne 163 · Vso 40 / Vs1 48 KIAS · Approach 65–70 (flaps 30) · Cruise 2,400 RPM ≈ 110 KTAS</p>
   <button class="primary" id="helpClose">Close</button>
@@ -182,25 +202,28 @@
     <div class="grid">
       <label>Start position
         <select id="spawn">
-          <option value="SFO28">KSFO San Francisco — Rwy 28L, ready for takeoff</option>
-          <option value="SFOramp">KSFO San Francisco — GA ramp, cold &amp; dark</option>
-          <option value="SFO1R">KSFO San Francisco — Rwy 1R, ready for takeoff</option>
-          <option value="OAK30">KOAK Oakland — Rwy 30, ready for takeoff</option>
-          <option value="OAK28R">KOAK Oakland — Rwy 28R (North Field), ready for takeoff</option>
-          <option value="SJC30">KSJC San Jose — Rwy 30L, ready for takeoff</option>
-          <option value="PAO31">KPAO Palo Alto — Rwy 31, ready for takeoff</option>
-          <option value="HWD28">KHWD Hayward — Rwy 28L, ready for takeoff</option>
-          <option value="SQL30">KSQL San Carlos — Rwy 30, ready for takeoff</option>
-          <option value="RHV31">KRHV Reid-Hillview — Rwy 31R, ready for takeoff</option>
-          <option value="LVK25">KLVK Livermore — Rwy 25R, ready for takeoff</option>
-          <option value="CCR32">KCCR Concord — Rwy 32R, ready for takeoff</option>
-          <option value="APC36">KAPC Napa — Rwy 19R, ready for takeoff</option>
-          <option value="HAF30">KHAF Half Moon Bay — Rwy 30, ready for takeoff</option>
-          <option value="DVO31">KDVO Gnoss Field — Rwy 31, ready for takeoff</option>
-          <option value="O69">O69 Petaluma — Rwy 29, ready for takeoff</option>
+          <optgroup label="Parked on the GA ramp — cold &amp; dark (start, taxi, take off)">
+            <option value="SFO28" selected>KSFO San Francisco — GA ramp, cold &amp; dark, depart Rwy 28L</option>
+            <option value="SFO1R">KSFO San Francisco — GA ramp, cold &amp; dark, depart Rwy 1R</option>
+            <option value="OAK28R">KOAK Oakland (North Field) — GA ramp, cold &amp; dark, depart Rwy 28R</option>
+            <option value="SJC30">KSJC San Jose — GA ramp, cold &amp; dark, depart Rwy 30L</option>
+            <option value="PAO31">KPAO Palo Alto — GA ramp, cold &amp; dark, depart Rwy 31</option>
+            <option value="HWD28">KHWD Hayward — GA ramp, cold &amp; dark, depart Rwy 28L</option>
+            <option value="SQL30">KSQL San Carlos — GA ramp, cold &amp; dark, depart Rwy 30</option>
+            <option value="RHV31">KRHV Reid-Hillview — GA ramp, cold &amp; dark, depart Rwy 31R</option>
+            <option value="LVK25">KLVK Livermore — GA ramp, cold &amp; dark, depart Rwy 25R</option>
+            <option value="CCR32">KCCR Concord — GA ramp, cold &amp; dark, depart Rwy 32R</option>
+            <option value="APC36">KAPC Napa — GA ramp, cold &amp; dark, depart Rwy 19R</option>
+            <option value="HAF30">KHAF Half Moon Bay — GA ramp, cold &amp; dark, depart Rwy 30</option>
+            <option value="DVO31">KDVO Gnoss Field — GA ramp, cold &amp; dark, depart Rwy 31</option>
+            <option value="O69">O69 Petaluma — GA ramp, cold &amp; dark, depart Rwy 29</option>
+          </optgroup>
+          <optgroup label="Quick starts — engine running">
+            <option value="SFO28rwy">KSFO San Francisco — lined up on Rwy 28L, ready for takeoff</option>
           <option value="ILS28">ILS 28L KSFO — 8 NM final, 3,000 ft</option>
           <option value="GG">Downtown San Francisco — 1,500 ft toward the Golden Gate</option>
           <option value="cruise">Cruise 4,500 ft — over the Bay</option>
+          </optgroup>
         </select></label>
       <label>Time of day <output id="todOut">10:00</output>
         <input id="tod" type="range" min="4" max="21.5" step="0.25" value="10" /></label>
@@ -268,7 +291,7 @@ window.startEdition = function (mode) {
     window.chooseLoadMode(mode);
     return;
   }
-  import('./src/main.js?v=20261123a').then(() => {
+  import('./src/main.js?v=20261123c').then(() => {
     if (typeof window.chooseLoadMode === 'function') window.chooseLoadMode(mode);
     else if (text) text.textContent = 'Failed to load the flight simulator.';
   }).catch((error) => {
@@ -277,7 +300,7 @@ window.startEdition = function (mode) {
   });
 };
 </script>
-<script type="module" src="./src/main.js?v=20261123a"></script>
+<script type="module" src="./src/main.js?v=20261123c"></script>
 <script data-pplx-inline-edit>
 (function () {
   if (window === window.top) return;

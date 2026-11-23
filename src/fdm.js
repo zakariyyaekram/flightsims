@@ -311,24 +311,34 @@ export class FDM {
     else if (far < 0.082) eff = 1 - Math.pow((0.082 - far) / 0.035, 2) * 0.9;
     else eff = 1 - Math.pow((far - 0.082) / 0.1, 2) * 0.9;
     eff = clamp(eff, 0, 1);
+    // 172S POH start: prime with the aux pump (mixture rich 3-5 s), then crank with the mixture at IDLE CUTOFF.
+    // The engine fires on the priming charge and keeps running only if the mixture is advanced within a few seconds.
+    const primed = !this.aircraft.carb && (s.primeT || 0) >= 1;
+    if (e.running && mix < 0.3 && (e.primeFuel || 0) > 0) { e.primeFuel -= dt; eff = Math.max(eff, 0.55); }
     const magOK = s.mags === 3 || s.mags === 4 ? 1 : s.mags === 1 || s.mags === 2 ? 0.965 : 0;
     const canRun = fuelAvail && magOK > 0 && eff > 0.15 && !s.engineFailed;
+    const canCatch = fuelAvail && magOK > 0 && !s.engineFailed && (mix > 0.3 ? eff > 0.15 : primed);
     // starter
     let starterTq = 0;
     const busOK = s.master && e.battery > 0.05;
     if (s.mags === 4 && busOK) { starterTq = 210 * clamp(1 - rpm / 320, 0, 1); e.ampsLoad += 120; e.battery -= dt * 0.0012; }
-    if (!e.running && canRun && rpm > 140 && s.mags >= 1 && mix > 0.3) {
+    if (!e.running && canCatch && rpm > 140 && s.mags >= 1) {
       // start catch rate depends on priming: carburetted 152 uses the plunger primer,
       // the fuel-injected 172S is primed by running the fuel pump with mixture rich
       let rate = 3.5;
       const cold = e.oilT < 110;
       if (this.aircraft.carb) { const p = s.primer || 0; if (cold) rate = p < 1 ? 0.25 : p > 6 ? 0.3 /* flooded */ : 3.0; }
-      else if (cold && (s.primeT || 0) < 1) rate = 0.8;
-      if (Math.random() < dt * rate) e.running = true;
+      else {
+        const pt = s.primeT || 0;
+        if (pt > 14 && c.throttle < 0.5) rate = 0.25; // flooded: POH flooded-start procedure (throttle 1/2 to full, mixture cutoff)
+        else if (cold && pt < 1) rate = 0.8;
+      }
+      if (Math.random() < dt * rate) { e.running = true; e.primeFuel = mix < 0.3 ? 3 : 0; if (mix < 0.3) eff = 0.55; }
     }
-    if (e.running && (!canRun || rpm < 120 || s.engineFailed)) e.running = false;
+    if (e.running && ((!canRun && !(e.primeFuel > 0 && magOK > 0 && fuelAvail && mix < 0.3)) || rpm < 120 || s.engineFailed)) e.running = false;
+    if (e.running && rpm > 500) s.primeT = 0;
     // indicated power: proportional to MAP and rpm (air mass flow)
-    if (!this.aircraft.carb && s.fuelPump && mix > 0.5 && fuelAvail && s.master) s.primeT = (s.primeT || 0) + dt;
+    if (!this.aircraft.carb && !e.running && s.fuelPump && mix > 0.5 && fuelAvail && s.master) s.primeT = (s.primeT || 0) + dt;
     if (e.running) { s.primer = 0; }
     let pInd = 0;
     if (e.running) {
@@ -337,7 +347,8 @@ export class FDM {
       if (s.carbHeat) pInd *= 0.94; // warm intake air: ~75 rpm drop
     }
     // friction & pumping losses
-    const fric = (6.5 + 0.0045 * rpm + 0.0000026 * rpm * rpm) * HP * 0.5 * clamp(rpm / 120, 0, 1);
+    // (below ~600 rpm the losses are mostly compression/pumping; scaled so the starter cranks at a realistic ~150-200 rpm)
+    const fric = (6.5 + 0.0045 * rpm + 0.0000026 * rpm * rpm) * HP * 0.5 * clamp(rpm / 120, 0, 1) * lerp(0.45, 1, clamp(rpm / 600, 0, 1));
     const omega = Math.max(e.propOmega, 1);
     const tq = (pInd - fric) / omega + starterTq;
     e.power = Math.max(0, pInd - fric);

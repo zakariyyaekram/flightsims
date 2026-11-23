@@ -125,3 +125,32 @@ kbd { font: 500 12px var(--mono); border: 1px solid var(--line); border-radius: 
   .grid { grid-template-columns: 1fr; } label:first-child { grid-column: auto; }
   .panelBox { padding: 18px; }
 }
+
+/* ---- checklist / start guide / taxi guidance */
+.helpChip { pointer-events: auto; cursor: pointer; color: #ffe9a8; border-color: rgba(255,214,0,.55); background: rgba(60,48,0,.55); }
+.helpChip:hover { background: rgba(110,88,0,.7); }
+.helpChip.on { color: #1a1400; background: #ffd600; border-color: #ffd600; }
+#taxiChip { color: #ffc6f3; border-color: rgba(255,43,214,.6); background: rgba(70,0,55,.55); }
+#ckl { position: absolute; left: 14px; top: 48px; width: min(430px, calc(100vw - 28px)); max-height: calc(100vh - 140px); display: flex; flex-direction: column; pointer-events: auto; background: rgba(7,10,13,.94); border: 1px solid rgba(255,214,0,.35); border-radius: 8px; box-shadow: 0 18px 50px rgba(0,0,0,.45); font-family: var(--font); }
+#ckl header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--line); background: linear-gradient(90deg, rgba(92,77,20,.4), rgba(7,10,13,.2)); }
+#ckl header div { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+#cklTabs { font: 600 14px var(--font); background: #11161b; color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; }
+#cklClose { width: 28px; height: 28px; border: 1px solid var(--line); border-radius: 4px; background: rgba(255,255,255,.04); color: var(--text); cursor: pointer; }
+.cklActions { display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,.06); }
+.cklActions button { min-height: 32px; border: 1px solid rgba(255,214,0,.4); border-radius: 5px; background: rgba(92,77,20,.4); color: #fff6d6; font: 600 12px var(--font); cursor: pointer; padding: 0 10px; }
+.cklActions button.primary { flex: 1; background: rgba(160,128,0,.55); }
+#cklList { list-style: none; margin: 0; padding: 4px 0; overflow: auto; flex: 1; }
+#cklList li { display: grid; grid-template-columns: 22px 1fr auto; gap: 8px; align-items: start; padding: 6px 12px; border-left: 3px solid transparent; cursor: default; }
+#cklList li.manual { cursor: pointer; }
+#cklList li .box { width: 18px; height: 18px; margin-top: 1px; border-radius: 3px; border: 1.5px solid #9aa4ab; display: grid; place-items: center; font: 700 13px var(--mono); color: #0b1a0b; }
+#cklList li.auto .box { border-style: dashed; border-color: #6f7a82; }
+#cklList li.done .box { background: #5fd08a; border: 1.5px solid #5fd08a; }
+#cklList li.done .txt b, #cklList li.done .txt em { color: #7f8a90; }
+#cklList li.cur { background: rgba(255,214,0,.1); border-left-color: #ffd600; }
+#cklList .txt { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; font-size: 13px; line-height: 1.3; }
+#cklList .txt b { font-weight: 600; color: #eef3f5; }
+#cklList .txt em { font-style: normal; font: 600 12px var(--mono); color: #ffd98a; margin-left: auto; text-align: right; }
+#cklList .txt small { flex-basis: 100%; color: #a9b6bd; font-size: 12px; margin-top: 3px; }
+#cklList button { font: 600 11px var(--font); border: 1px solid rgba(255,214,0,.45); background: rgba(60,48,0,.5); color: #ffe9a8; border-radius: 4px; padding: 3px 8px; cursor: pointer; }
+#cklList button:hover { background: rgba(120,96,0,.7); }
+#cklHint { margin: 0; padding: 8px 12px 10px; font-size: 11.5px; color: #93a1a9; border-top: 1px solid rgba(255,255,255,.06); }

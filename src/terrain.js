@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { heightAt, forestAt, farmAt, WORLD_HALF, WORLD_CX, WORLD_CZ, WATER_LEVEL, townAt, pavedAt } from './geo.js';
 import { texArray, PH } from './textures.js';
-import { GROUND_GLSL } from './ground.js?v=20261123a';
+import { GROUND_GLSL } from './ground.js?v=20261123c';
 
 const N = 32; // segments per tile
 const MIN_SIZE = 128;
