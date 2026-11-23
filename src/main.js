@@ -1,25 +1,28 @@
 // Skyhawk — main loop, cameras, input, UI.
 import * as THREE from 'three';
-import { FDM, KT, FT, C172, C152 } from './fdm.js?v=20261123c';
+import { FDM, KT, FT, C172, C152 } from './fdm.js?v=20261123d';
 import { qrot } from './math.js';
 import { groundQuery, heightAt, AIRPORTS, NAVAIDS, fromLocal, toLocal, WATER_LEVEL, findRunway, runwayEnd, inWorld, waterFrac, ll2w } from './geo.js';
-import { createTerrainMaterial, Terrain } from './terrain.js?v=20261123c';
-import { GroundOverlay } from './ground.js?v=20261123c';
-import { GrassBlades, CropField } from './blades.js?v=20261123c';
-import { buildAircraft, animateAircraft } from './aircraft.js?v=20261123c';
-import { Panel } from './panel.js?v=20261123c';
-import { Avionics, ILS } from './avionics.js?v=20261123c';
+import { createTerrainMaterial, Terrain } from './terrain.js?v=20261123d';
+import { OrthoManager } from './ortho.js?v=20261123d';
+let orthoMgr = null;
+import { GroundOverlay } from './ground.js?v=20261123d';
+import { GrassBlades, CropField } from './blades.js?v=20261123d';
+import { buildAircraft, animateAircraft } from './aircraft.js?v=20261123d';
+import { Panel } from './panel.js?v=20261123d';
+import { Avionics, ILS } from './avionics.js?v=20261123d';
 import { Environment } from './env.js';
 import { buildAirports, RockField, Forest, GrassField } from './world.js';
-import { Scenery } from './scenery.js?v=20261123c';
-import { Traffic } from './traffic.js?v=20261123c';
-import { buildLife } from './life.js?v=20261123c';
-import { MovingMap } from './map.js?v=20261123c';
-import { departureRoute, routeProgress } from './taxi.js?v=20261123c';
-import { Checklist } from './checklist.js?v=20261123c';
+import { Scenery } from './scenery.js?v=20261123d';
+import { Traffic } from './traffic.js?v=20261123d';
+import { buildLife } from './life.js?v=20261123d';
+import { MovingMap } from './map.js?v=20261123d';
+import { departureRoute, routeProgress } from './taxi.js?v=20261123d';
+import { toggleTaxiMap, updateTaxiMap, taxiMapOpen } from './taximap.js?v=20261123d';
+import { Checklist } from './checklist.js?v=20261123d';
 import { Sound } from './audio.js';
 import { setAniso } from './textures.js';
-import { ATC } from './atc.js?v=20261123c';
+import { ATC } from './atc.js?v=20261123d';
 import { initCesium, syncCesiumCamera, getCesiumElevationWorld, warmCesiumTerrain } from './cesium.js?v=20261120';
 
 const $ = (id) => document.getElementById(id);
@@ -245,7 +248,7 @@ async function init() {
     }
   }
   progress(0.92, 'Adding vehicles and airport activity…');
-  const realFarms = ground ? await fetch('./data/farms.json?v=20261123c').then((r) => r.json()).catch(() => null) : null;
+  const realFarms = ground ? await fetch('./data/farms.json?v=20261123d').then((r) => r.json()).catch(() => null) : null;
   life = await buildLife(scene, { cars: loadMode === 'light' ? 160 : 380, streets: scenery ? (x, z, r) => scenery.streetsNear(x, z, r) : null, realFarms, flatStreets: !!ground });
   if (loadMode === 'light') life.quality = 0.55;
   sim.life = life;
@@ -527,7 +530,7 @@ window.addEventListener('keydown', (e) => {
   if (e.repeat && !['KeyI', 'BracketLeft', 'BracketRight'].includes(e.code)) { if (e.shiftKey && e.code.startsWith('Arrow')) {} else return; }
   const sh = e.shiftKey;
   switch (e.code) {
-    case 'Escape': if (!$('help').classList.contains('hidden')) { $('help').classList.add('hidden'); break; } if (!$('mapWrap').classList.contains('hidden')) { toggleMap(false); break; } togglePause(); if (sim.paused) showMenu(true); break;
+    case 'Escape': if (taxiMapOpen()) { toggleTaxiMap(false); $('tmapBtn').classList.remove('on'); break; } if (!$('help').classList.contains('hidden')) { $('help').classList.add('hidden'); break; } if (!$('mapWrap').classList.contains('hidden')) { toggleMap(false); break; } togglePause(); if (sim.paused) showMenu(true); break;
     case 'KeyF':
       if (sh) toggleFailurePanel();
       else if (!walkView()) { F.ctrl.flaps = Math.min(3, F.ctrl.flaps + 1); toast('Flaps ' + ['UP', '10°', '20°', 'FULL'][F.ctrl.flaps]); }
@@ -595,6 +598,7 @@ window.addEventListener('keydown', (e) => {
     case 'KeyU': $('strip').classList.toggle('hidden'); break;
     case 'KeyC': setView(views[(views.indexOf(sim.view) + 1) % views.length]); break;
     case 'Digit1': case 'Digit2': case 'Digit3': case 'Digit4': case 'Digit5': case 'Digit6': case 'Digit7': setView(views[+e.code.slice(5) - 1]); break;
+    case 'Digit8': $('tmapBtn').classList.toggle('on', toggleTaxiMap(undefined, sim)); break;
     case 'Digit9': sim.simRate = sim.simRate >= 4 ? 1 : sim.simRate * 2; toast('Sim rate ' + sim.simRate + '×'); break;
     case 'Space': look.yaw = 0; look.pitch = -10; camera.fov = 58; camera.updateProjectionMatrix(); break;
     case 'Slash': $('help').classList.toggle('hidden'); break;
@@ -1027,6 +1031,7 @@ const camPos = new THREE.Vector3();
 function frame(dtReal) {
   const F = sim.fdm;
   const dt = Math.min(0.05, dtReal);
+  if (sim.started) updateTaxiMap(sim);
   if (sim.started && !sim.paused) {
     updateControls(dt);
     if (sim.failurePending) {
@@ -1070,6 +1075,7 @@ function frame(dtReal) {
   if (forest && rocks) { forest.update(camPos, 3); rocks.update(camPos, 3); }
   if (grass) grass.update(camPos, agl);
   if (ground) ground.update(camPos, agl);
+  (orthoMgr ||= new OrthoManager(renderer)).update(camPos);
   if (blades) blades.update(camPos, agl, t, sim.windVec, camera);
   if (crops) crops.update(camPos, agl);
   if (life) life.update(camPos, sim.paused ? 0 : dt * (sim.started ? sim.simRate : 1), t);
@@ -1143,7 +1149,7 @@ function updateHighlight(t) {
 const checklist = new Checklist(sim, showControl); sim.checklist = checklist;
 $('cklBtn').onclick = () => checklist.toggle();
 // stop the look-around drag from starting when using the checklist / buttons
-for (const id of ['ckl', 'cklBtn', 'taxiBtn']) $(id).addEventListener('mousedown', (e) => e.stopPropagation());
+for (const id of ['ckl', 'cklBtn', 'taxiBtn', 'tmapBtn']) $(id).addEventListener('mousedown', (e) => e.stopPropagation());
 
 // magenta taxi line painted on the real taxiways from the ramp to the hold-short point
 var taxiLine = null; // var: applySetup may run before this line during load
@@ -1216,6 +1222,7 @@ function toggleTaxiLine() {
   toast(sim.taxi.show ? `Taxi line ON — Rwy ${sim.taxi.route.rwy} via ${sim.taxi.route.viaText}` : 'Taxi line OFF');
 }
 $('taxiBtn').onclick = toggleTaxiLine;
+$('tmapBtn').onclick = () => { $('tmapBtn').classList.toggle('on', toggleTaxiMap(undefined, sim)); };
 var taxiT = 0;
 function updateTaxiGuide(dt) {
   const tx = sim.taxi; if (!tx) return;

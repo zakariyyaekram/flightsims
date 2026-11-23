@@ -8,7 +8,7 @@
 import { fbm, simplex } from './noise.js';
 
 const DATA = new URL('../data/', import.meta.url);
-const DV = '?v=20261123c';
+const DV = '?v=20261123d';
 const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 async function json(name) { const r = await fetch(new URL(name + DV, DATA)); if (!r.ok) throw new Error('missing ' + name); return r.json(); }
@@ -56,6 +56,19 @@ for (let i = 0, j = 0; i < NX * NZ; i++, j += 4) {
   TREE[i] = COVPX[j]; BUILT[i] = COVPX[j + 1]; CROP[i] = COVPX[j + 2];
 }
 export const RASTER = { H, WF, TREE, BUILT, CROP };
+// tree-cover masks measured from NAIP colour-infrared around each airport (tools/bake_vegmask.py)
+const VEG = (await Promise.all(APDATA.filter((d) => d.ortho).map(async (d) => {
+  try { const px = await pixels(`ortho/${d.icao}_veg.png`); const o = d.ortho; const w = Math.ceil((o.x1 - o.x0) / 4), h = Math.ceil((o.z1 - o.z0) / 4); return px.length === w * h * 4 ? { o, w, h, px } : null; } catch { return null; }
+}))).filter(Boolean);
+function vegAt(x, z, base) {
+  for (const v of VEG) {
+    const o = v.o; if (x <= o.x0 || z <= o.z0 || x >= o.x1 || z >= o.z1) continue;
+    const i = Math.min(v.w - 1, ((x - o.x0) / 4) | 0), j = Math.min(v.h - 1, ((z - o.z0) / 4) | 0);
+    const e = Math.min(x - o.x0, o.x1 - x, z - o.z0, o.z1 - z), w = Math.min(1, e / 160);
+    return base * (1 - w) + (v.px[(j * v.w + i) * 4] / 255) * w;
+  }
+  return base;
+}
 
 function bil(arr, x, z, scale = 1) {
   let fx = (x - X0) / CELL, fz = (z - Z0) / CELL;
@@ -98,8 +111,8 @@ export const AIRPORTS = APDATA.map((d) => {
   a.runways.sort((p, q) => q.len - p.len);
   const P = a.runways[0];
   Object.assign(a, { x: P.x, z: P.z, hdg: P.hdg, len: P.len, wid: P.wid, rwy: P.rwy, dir: P.dir, perp: P.perp, elev: P.elev, ils: P.ils });
-  a.taxiways = d.taxiways; a.aprons = d.aprons.filter((p) => p.p.length >= 3); a.buildings = d.buildings; a.socks = d.socks;
-  a.towerInfo = d.tower ? { x: d.tower.p[0], z: d.tower.p[1], h: d.tower.h, r: d.tower.r } : null;
+  a.taxiways = d.taxiways; a.aprons = d.aprons.filter((p) => p.p.length >= 3); a.buildings = d.buildings; a.socks = d.socks; a.ortho = d.ortho || null;
+  a.towerInfo = d.tower ? { x: d.tower.p[0], z: d.tower.p[1], h: d.tower.h, r: d.tower.r, t: d.tower.t, cf: d.tower.cf } : null;
   // extent radius
   let R = 0; for (const r of a.runways) R = Math.max(R, Math.hypot(r.le[0] - d.x, r.le[1] - d.z), Math.hypot(r.he[0] - d.x, r.he[1] - d.z));
   for (const ap of a.aprons) for (const q of ap.p) R = Math.max(R, Math.hypot(q[0] - d.x, q[1] - d.z));
@@ -357,7 +370,7 @@ export function groundQuery(x, z, y = 1e9) {
 // ---------------- land cover (ESA WorldCover fractions at 50 m) ----------------
 export function forestAt(x, z, h, slope = 0) {
   if (waterFrac(x, z) > 0.4) return 0;
-  return bil(TREE, x, z, 1 / 255) * (1 - ss(0.6, 0.85, slope));
+  return vegAt(x, z, bil(TREE, x, z, 1 / 255)) * (1 - ss(0.6, 0.85, slope));
 }
 export function townAt(x, z) { return bil(BUILT, x, z, 1 / 255); }
 export function farmAt(x, z) { return bil(CROP, x, z, 1 / 255); }

@@ -36,6 +36,7 @@
     <span id="imcChip" class="chip hidden">IMC</span>
     <button id="cklBtn" class="chip helpChip" type="button" title="Checklists and engine-start guide (H)">CHECKLIST · H</button>
     <button id="taxiBtn" class="chip helpChip hidden" type="button" title="Show / hide the taxi line to the runway (T)">TAXI LINE · T</button>
+    <button id="tmapBtn" class="chip helpChip" type="button" title="Airport diagram / taxi map with taxiway names (8)">TAXI MAP · 8</button>
     <span id="taxiChip" class="chip hidden"></span>
   </div>
   <div id="strip">
@@ -141,6 +142,7 @@
         <dt>Shift+M</dt><dd>Master BAT + ALT</dd>
         <dt>Shift+V</dt><dd>Avionics bus</dd>
         <dt>H</dt><dd>Checklists (Cessna POH normal procedures) &amp; the guided engine start. "Show" turns your head to the control and rings it in yellow</dd>
+        <dt>8</dt><dd>Taxi map: FAA-style airport diagram of the nearest airport with runway numbers, taxiway letters, hold-short lines, your position and your cleared route (drag to pan, wheel to zoom, Esc to close)</dd>
         <dt>T</dt><dd>Taxi line: magenta line on the real taxiways from the GA ramp to the runway hold-short bar</dd>
         <dt>Shift+E</dt><dd>Auto-start (runs the starting checklist for you)</dd>
         <dt>L / Shift+L</dt><dd>Landing / taxi light</dd>
@@ -291,7 +293,7 @@ window.startEdition = function (mode) {
     window.chooseLoadMode(mode);
     return;
   }
-  import('./src/main.js?v=20261123c').then(() => {
+  import('./src/main.js?v=20261123d').then(() => {
     if (typeof window.chooseLoadMode === 'function') window.chooseLoadMode(mode);
     else if (text) text.textContent = 'Failed to load the flight simulator.';
   }).catch((error) => {
@@ -300,7 +302,7 @@ window.startEdition = function (mode) {
   });
 };
 </script>
-<script type="module" src="./src/main.js?v=20261123c"></script>
+<script type="module" src="./src/main.js?v=20261123d"></script>
 <script data-pplx-inline-edit>
 (function () {
   if (window === window.top) return;

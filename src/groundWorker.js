@@ -41,7 +41,7 @@ function tile(tx, tz) {
   if (!INDEX.has(key)) return Promise.resolve(null);
   let p = cache.get(key);
   if (!p) {
-    p = fetch(BASE + 'ground/' + key + '.bin?v=20261123c').then((r) => (r.ok ? r.arrayBuffer() : null)).then((b) => (b ? parse(b, tx, tz) : null)).catch(() => null);
+    p = fetch(BASE + 'ground/' + key + '.bin?v=20261123d').then((r) => (r.ok ? r.arrayBuffer() : null)).then((b) => (b ? parse(b, tx, tz) : null)).catch(() => null);
     cache.set(key, p);
     if (cache.size > 160) cache.delete(cache.keys().next().value);
   }
