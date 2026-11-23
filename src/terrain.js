@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { heightAt, forestAt, farmAt, WORLD_HALF, WORLD_CX, WORLD_CZ, WATER_LEVEL, townAt, pavedAt } from './geo.js';
 import { texArray, PH } from './textures.js';
+import { GROUND_GLSL } from './ground.js?v=20261123a';
 
 const N = 32; // segments per tile
 const MIN_SIZE = 128;
@@ -10,7 +11,7 @@ export const TERRAIN_LAYERS = [
   'leafy_grass', 'forest_ground_04', 'rock_face_03', 'dry_ground_rocks', 'coast_sand_01', 'snow_02', 'aerial_grass_rock', 'aerial_rocks_02', 'brown_mud_leaves_01',
 ];
 
-export async function createTerrainMaterial(onProgress, size = 1024) {
+export async function createTerrainMaterial(onProgress, size = 1024, groundUniforms = null) {
   const diff = await texArray(TERRAIN_LAYERS.map((n) => PH(n, 'diff')), size, true);
   onProgress?.(0.5);
   const nor = await texArray(TERRAIN_LAYERS.slice(0, 6).map((n) => PH(n, 'nor_gl')), size, false);
@@ -21,6 +22,7 @@ export async function createTerrainMaterial(onProgress, size = 1024) {
     uAvg: { value: diff.avg.map((a) => new THREE.Vector3(...a)) },
     uCam: { value: new THREE.Vector3() }, uSnow: { value: 1750 }, uWater: { value: WATER_LEVEL },
     uSeason: { value: 0.0 },
+    ...(groundUniforms || { uGO0: { value: null }, uGO1: { value: null }, uGOr0: { value: new THREE.Vector4() }, uGOr1: { value: new THREE.Vector4() }, uGOon: { value: 0 }, uDry: { value: 0 } }),
   };
   mat.userData.uniforms = uniforms;
   mat.onBeforeCompile = (sh) => {
@@ -43,6 +45,9 @@ vec3 T(int l, vec2 uv){ return texture(uDiff, vec3(uv, float(l))).rgb; }
 vec3 T2(int l, vec2 p, float s){ vec2 q = mat2(.8,-.6,.6,.8)*p; return mix(T(l,p/s), T(l,q/(s*3.7)), .35); }
 vec3 NT(int l, vec2 uv){ return texture(uNor, vec3(uv, float(l))).xyz*2.-1.; }
 vec3 gTerrainN; float gRough;
+${GROUND_GLSL}
+vec2 rot2(vec2 p, float a){ float c = cos(a), s = sin(a); return vec2(c*p.x + s*p.y, -s*p.x + c*p.y); }
+float hh(float n){ return fract(sin(n*12.9898)*43758.5453); }
 `)
       .replace('#include <map_fragment>', `
   vec3 Nw = normalize(vNW);
@@ -69,12 +74,27 @@ vec3 gTerrainN; float gRough;
   vec3 dry = vec3(0.78,0.70,0.45);
   grassC *= mix(vec3(1.0), dry*1.25, smoothstep(.45,.8,m1)*.35);
   grassC *= mix(.82, 1.12, m2);
+  GS g = groundSample(p, h21(floor(p * 0.7)) * 0.98 + 0.01);
+  float og = g.w; // 1 where real OSM ground data is available
+  if (uGOon > 0.5) {
+    // season: California hills turn golden in summer / autumn; north-facing slopes and valley floors stay greener
+    float dryA = clamp(uDry + (m1 - 0.5) * 0.6 + Nw.z * 0.6 - smoothstep(0., 60., uWater + 40. - vW.y) * 0.2, 0., 1.);
+    vec3 gl = grassD / max(uAvg[0], vec3(.05));
+    float lum = dot(mix(vec3(1.), gl, near*.8), vec3(.3,.59,.11));
+    vec3 golden = mix(vec3(.36,.28,.15), vec3(.45,.37,.22), m3) * lum;
+    golden = mix(golden, vec3(.27,.26,.15)*lum, smoothstep(.45,.8,m2)*.55); // olive patches
+    // dark coyote-brush / coastal scrub clumps and first-rain green flush in hollows
+    float bush = smoothstep(.58, .72, fbm3(p/16. + 11.3)) * (1. - near*.3);
+    golden = mix(golden, vec3(.10,.12,.06)*(0.8+0.4*m3), bush*.75);
+    golden = mix(golden, vec3(.20,.26,.10)*lum, smoothstep(.6,.85,fbm3(p/60.-4.))*(1.-uDry)*.8);
+    grassC = mix(grassC, golden, smoothstep(.2, .7, dryA));
+  }
   vec3 col = grassC;
   // worn dirt patches
   float wDirt = smoothstep(.62,.78, m2*.7+m3*.4) * (1.-near*.2) + smoothstep(.22,.38,slope)*.6;
   col = mix(col, mix(dirtD*.9, grassA*0.75, 1.-near), clamp(wDirt,0.,1.));
   // ---- town lawns: mown, watered grass with garden/hedge variation ----
-  float lawn = smoothstep(0., .5, -vCover.y);
+  float lawn = smoothstep(0., .5, -vCover.y) * (g.cls == 0 ? 1. : 0.);
   if (lawn > 0.01) {
     vec3 lawnC = vec3(.20,.31,.10) * mix(vec3(1.), grassD / max(uAvg[0], vec3(.05)), near*.6) * (0.85 + 0.3*m3);
     float stripe = 0.5 + 0.5*sin(dot(p, vec2(.7,.7)) * 0.9);
@@ -92,7 +112,7 @@ vec3 gTerrainN; float gRough;
     }
   }
   // ---- farmland: rotated field grid with crops & plough rows ----
-  float farm = smoothstep(.25,.6,vCover.y);
+  float farm = smoothstep(.25,.6,vCover.y) * (g.cls == 0 ? 1. : 0.);
   if (farm > 0.01) {
     float ang = floor(m1*4.)*0.37 + 0.2;
     mat2 R = mat2(cos(ang),-sin(ang),sin(ang),cos(ang));
@@ -124,9 +144,92 @@ vec3 gTerrainN; float gRough;
     fcol = mix(fcol, hedgeC, hedge * (0.6 + 0.4*(1.-near)));
     col = mix(col, fcol, farm);
   }
+
+  // ---- real land use from OpenStreetMap ----
+  float treeOK = 1.0; float gWater = 0.0;
+  if (g.cls > 0) {
+    float hs = float(g.hsh);
+    vec2 q = rot2(p, g.ori);
+    vec3 gl = mix(vec3(1.), grassD / max(uAvg[0], vec3(.05)), near*.7);
+    vec3 sl = mix(vec3(1.), dirtD / max(uAvg[3], vec3(.05)), near*.7);
+    float fineFade = 1.0 - smoothstep(120., 700., dist);
+    vec3 lawnC = mix(vec3(.14,.21,.07), vec3(.19,.25,.10), m3) * gl * (0.86 + 0.28*m3);
+    lawnC = mix(lawnC, vec3(.36,.32,.19)*gl, smoothstep(.5,.85,fbm3(p/23.+hs))*(.3+.45*uDry)); // dry / unwatered yards
+    vec3 cc = col; float cw = 1.0;
+    int c = g.cls;
+    if (c == 1) { // farmland: November - ploughed, stubble, winter cover crop, fallow
+      float t = hh(hs + floor(m1*3.)*7.) * 4.;
+      float rowsp = t < 2. ? 0.9 : 0.6;
+      float rows = 0.5 + 0.5*sin(q.y * 6.2832 / rowsp);
+      if (t < 1.) cc = vec3(.30,.23,.16) * sl * (0.8 + 0.35*rows*fineFade);         // ploughed soil
+      else if (t < 2.) cc = mix(vec3(.30,.24,.16)*sl, vec3(.20,.30,.10)*gl, 0.35 + 0.55*rows*fineFade + 0.2*m3); // sprouting rows
+      else if (t < 3.) cc = vec3(.52,.45,.28) * gl * (0.85 + 0.2*rows*fineFade);    // stubble / straw
+      else cc = mix(vec3(.42,.36,.22), vec3(.22,.30,.12), m2) * gl;                 // fallow / pasture
+      // tractor turn-row at the border handled by the land-use edges; wheel tracks
+      cc *= 1.0 - 0.12 * smoothstep(.96, 1., abs(sin(q.x * 6.2832 / 24.))) * fineFade;
+      treeOK = 0.0;
+    } else if (c == 29) { cc = mix(lawnC, col, .45); // urban grass, verges
+    } else if (c == 2) { // meadow / pasture
+      cc = mix(col, mix(vec3(.24,.31,.12)*gl, col, uDry*.7), .5 + .1*hs/7.);
+    } else if (c == 3) { // orchard: tree rows with mown grass alleys
+      vec2 cell = vec2(6.5, 5.0); vec2 f = (fract(q / cell) - .5) * cell;
+      float tr = 1.0 - smoothstep(1.6, 2.4, length(f));
+      vec3 alley = mix(vec3(.24,.30,.12)*gl, vec3(.36,.30,.20)*sl, abs(f.x) < 1.2 ? .7 : .15);
+      vec3 canopyO = mix(vec3(.10,.15,.05), vec3(.32,.24,.08), hh(hs)*0.7 + 0.2) * (0.8 + 0.4*m3); // autumn orchard leaves
+      cc = mix(alley, canopyO, tr * (0.5 + 0.5*fineFade) + (1.-fineFade)*.35);
+      treeOK = 0.0;
+    } else if (c == 4) { // vineyard: trellis rows, autumn foliage, cover crop between
+      float rw = 2.4; float r = abs(fract(q.y / rw) - .5) * rw;
+      float vine = 1.0 - smoothstep(0.45, 0.9, r);
+      vec3 leaf = mix(vec3(.46,.36,.10), vec3(.42,.14,.07), hh(hs*3.1 + floor(q.x/80.)));
+      leaf = mix(leaf, vec3(.30,.25,.12), .3*m3);
+      vec3 inter = mix(vec3(.30,.25,.17)*sl, vec3(.22,.30,.11)*gl, hh(hs + 9.) > .5 ? .7 : .1);
+      cc = mix(inter, leaf, vine * fineFade + (1.-fineFade)*.45);
+      treeOK = 0.0;
+    } else if (c == 5) { // farmyard
+      cc = mix(vec3(.37,.32,.24)*sl, vec3(.30,.30,.18)*gl, smoothstep(.4,.7,m3));
+    } else if (c == 6) { // residential: lawns, gardens
+      cc = lawnC;
+      cc = mix(cc, vec3(.27,.22,.16)*sl, smoothstep(.7,.85,fbm3(p/7.+3.))*.6); // beds / mulch
+    } else if (c == 7 || c == 8) { // commercial / industrial lots
+      vec3 conc = vec3(.30,.29,.27) * sl * (0.85 + 0.25*m3);
+      cc = mix(conc, vec3(.33,.30,.25)*sl, smoothstep(.55,.8,m2)*.6);
+      cc = mix(cc, lawnC, smoothstep(.72,.85,fbm3(p/15.))*.5);
+      treeOK = 0.4;
+    } else if (c == 9 || c == 17 || c == 27 || c == 16) { // park, grounds, playground, cemetery
+      cc = lawnC * (0.94 + 0.1*step(.5, fract(q.x/5.))*fineFade);
+      if (c == 16) { vec2 f = fract(q / vec2(2.2, 3.0)) - .5; cc = mix(cc, vec3(.55,.54,.5), (1.-smoothstep(.06,.12,length(f*vec2(1.,2.))))*fineFade*.8); }
+      if (c == 27) cc = mix(cc, vec3(.40,.33,.24), .6);
+    } else if (c == 10) { cc = vec3(.15,.27,.07) * gl * (0.9+0.2*m3); }                         // golf rough
+    else if (c == 11) { cc = vec3(.16,.33,.07) * gl * (0.93 + 0.1*step(.5, fract(q.x/12.)) * fineFade); treeOK = 0.; }
+    else if (c == 12) { cc = vec3(.17,.37,.08) * mix(vec3(1.), gl, .3); treeOK = 0.; }          // putting green
+    else if (c == 13) { cc = mix(sandD, vec3(.68,.62,.48), .4) * 1.05; treeOK = 0.; }           // bunker
+    else if (c == 14) { cc = vec3(.15,.31,.07) * (0.92 + 0.1*step(.5, fract(q.x/8.))*fineFade); treeOK = 0.; } // sports pitch
+    else if (c == 15) { cc = vec3(.42,.17,.11) * (0.9+0.15*m3); treeOK = 0.; }                  // running track
+    else if (c == 18) { treeOK = 2.0; cc = mix(col, forestD*.6, .5); }                          // wood
+    else if (c == 19) { // scrub / chaparral
+      float bush = smoothstep(.45, .6, fbm3(p/3.5 + hs));
+      cc = mix(mix(col, vec3(.30,.27,.17)*sl, .3), vec3(.10,.13,.06)*(0.7+0.6*m3), bush*.85);
+    } else if (c == 20) { // wetland / marsh
+      cc = mix(vec3(.25,.27,.13)*gl, vec3(.33,.29,.18), m3);
+      float ch = smoothstep(.48, .5, fbm3(p/18.)) * (1.-smoothstep(.5,.53, fbm3(p/18.)));
+      cc = mix(cc, vec3(.05,.08,.08), ch*.8); treeOK = 0.;
+    } else if (c == 21) { cc = mix(dirtD, rockD, .5) * .9; treeOK = 0.; }                      // bare rock / sand
+    else if (c == 22) { // parking lot with stall stripes
+      vec3 asph = vec3(.075) * (0.85 + 0.3*vnoise(p*.7)) * mix(vec3(1.), sl, near*.3);
+      vec2 f = q / vec2(2.7, 5.4); float st = (1.-smoothstep(.02,.05,abs(fract(f.x)-.5)-.45)) * step(abs(fract(f.y*.5)-.5), .45);
+      cc = mix(asph, vec3(.6,.6,.56), st*fineFade*.8); treeOK = 0.;
+    } else if (c == 23 || c == 28) { // pools & ponds
+      cc = c == 23 ? vec3(.10,.42,.52) : mix(vec3(.04,.08,.09), vec3(.06,.10,.08), m2); gWater = 1.0; treeOK = 0.;
+    } else if (c == 24) { float r = abs(fract(q.y/1.6)-.5); cc = mix(vec3(.32,.30,.27), vec3(.10,.20,.06)*gl, step(r,.3)); treeOK = 0.; }
+    else if (c == 25) { vec2 id = floor(q/vec2(9.,14.)); cc = mix(vec3(.30,.24,.16)*sl, vec3(.18,.30,.09)*gl, hh(dot(id,vec2(1.3,7.1)))); }
+    else if (c == 26) { cc = vec3(.30,.28,.25) * sl * (0.8 + 0.3*vnoise(p*2.)); treeOK = 0.; }  // rail ballast
+    col = mix(col, cc, og * cw);
+  }
   // ---- forest canopy ----
   float fo = clamp(vCover.x + (m3-.5)*.5 + (m2-.5)*.3, 0., 1.);
   fo = smoothstep(.35, .55, fo);
+  if (og > 0.0) fo = treeOK > 1.5 ? max(fo, .85) : fo * mix(1.0, treeOK, og);
   vec3 canopy = mix(vec3(.06,.10,.045), vec3(.11,.15,.06), m3) * (0.55 + 0.9*T(6, p/45.).g);
   canopy = mix(canopy, canopy*vec3(1.1,1.0,.8), smoothstep(800.,1500.,vW.y));
   vec3 forestC = mix(canopy, forestD*.55, near*.65);
@@ -137,21 +240,46 @@ vec3 gTerrainN; float gRough;
   vec3 rockC = mix(rockA * 1.05, rockD, near);
   col = mix(col, rockC, wRock);
   // ---- shoreline sand ----
-  float wSand = (1.0 - smoothstep(uWater+0.3, uWater+1.6 + m3*1.2, vW.y)) * (1.0 - smoothstep(0., .3, -vCover.y));
+  float wSand = (1.0 - smoothstep(uWater+0.3, uWater+1.6 + m3*1.2, vW.y)) * (1.0 - smoothstep(0., .3, -vCover.y)) * ((og > 0.0 && g.cls != 0 && g.cls != 21 && g.cls != 13) ? 1.0 - og : 1.0);
   col = mix(col, mix(sandD*.95, vec3(.55,.5,.4), 1.-near), wSand);
   // ---- snow ----
   float wSnow = smoothstep(uSnow - 60., uSnow + 80., vW.y + (m1-.5)*260. + (m3-.5)*60.) * (1. - smoothstep(.45, .7, slope));
   col = mix(col, mix(vec3(.86,.88,.92), snowD, near), wSnow);
+
+  // ---- pavement from OSM: streets, sidewalks, driveways, paths, tracks ----
+  float pcov = og > 0.0 ? g.cov : 0.0;
+  if (pcov > 0.003) {
+    float pm = g.mat;
+    float gn = vnoise(p*2.3)*.5 + vnoise(p*9.1)*.3 + h21(floor(p*12.))*.2;
+    float closeF = 1.-smoothstep(15., 60., dist);
+    // asphalt with patches, oil streaks and fine cracks
+    vec3 cA = vec3(.068) * (0.82 + 0.3*gn) * mix(vec3(1.), dirtD / max(uAvg[3], vec3(.05)), near*.18);
+    cA *= 0.9 + 0.2*smoothstep(.55,.8,m2);
+    float cn = fbm3(p*vec2(.35,1.1) + 3.7); float ck = smoothstep(.49, .5, cn) * (1.-smoothstep(.5,.51, cn));
+    cA *= 1.0 - ck * .18 * closeF;
+    // concrete with expansion joints
+    vec3 cC = vec3(.34,.33,.31) * (0.86 + 0.2*gn);
+    vec2 sl2 = abs(fract(p / 1.6) - 0.5); cC *= 1.0 - smoothstep(.46, .5, max(sl2.x, sl2.y)) * (1.0 - smoothstep(20., 70., dist)) * .3;
+    vec3 cG = mix(vec3(.40,.37,.32), vec3(.30,.28,.24), h21(floor(p*20.))) * (0.85+0.25*gn);
+    vec3 cD = vec3(.37,.29,.20) * (0.8 + 0.35*gn) * mix(vec3(1.), dirtD / max(uAvg[3], vec3(.05)), near*.5);
+    vec3 pc = pm < 1.0 ? mix(cA, cC, smoothstep(0.25, 0.75, pm)) : pm < 2.0 ? mix(cC, cG, smoothstep(1.25, 1.75, pm)) : mix(cG, cD, smoothstep(2.25, 2.75, pm));
+    // grass growing over the edges of tracks / paths, darker kerb line at paved edges
+    float edgeK = 1.0 - abs(pcov*2.0 - 1.0);
+    pc *= pm < 1.5 ? 1.0 - edgeK*.25 : 1.0;
+    float a = pm > 1.5 ? smoothstep(.15, .9, pcov + (gn - .5)*.4) : smoothstep(.05, .6, pcov);
+    col = mix(col, pc, a);
+    gWater *= 1.0 - a;
+  }
   // far haze desaturation (Rayleigh is handled by fog)
   col = mix(col, vec3(dot(col, vec3(.3,.59,.11))), (1.-mid)*.25);
   diffuseColor.rgb *= col;
-  gRough = mix(0.97, 0.88, wRock); gRough = mix(gRough, 0.55, wSnow);
+  gRough = mix(0.97, 0.88, wRock); gRough = mix(gRough, 0.55, wSnow); gRough = mix(gRough, 0.08, gWater);
   // detail normal blend
   vec3 tn = vec3(0.,0.,1.);
   if (near > 0.0) {
     vec3 ng = NT(0, p/3.2), nr = NT(2, p/9.), nd = NT(3, p/4.), ns = NT(5, p/6.);
     tn = normalize(mix(mix(mix(ng, nd, clamp(wDirt,0.,1.)), nr, wRock), ns, wSnow));
-    tn.xy *= near * 1.2;
+    tn.xy *= near * 1.2 * (1.0 - (og > 0.0 ? smoothstep(.1,.7,g.cov) * .8 + gWater : 0.0));
   }
   gTerrainN = tn;
 `)

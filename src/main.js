@@ -1,21 +1,23 @@
 // Skyhawk — main loop, cameras, input, UI.
 import * as THREE from 'three';
-import { FDM, KT, FT, C172, C152 } from './fdm.js?v=20261122d';
+import { FDM, KT, FT, C172, C152 } from './fdm.js?v=20261123a';
 import { qrot } from './math.js';
 import { groundQuery, heightAt, AIRPORTS, NAVAIDS, fromLocal, toLocal, WATER_LEVEL, findRunway, runwayEnd, inWorld, waterFrac, ll2w } from './geo.js';
-import { createTerrainMaterial, Terrain } from './terrain.js';
-import { buildAircraft, animateAircraft } from './aircraft.js?v=20261122d';
-import { Panel } from './panel.js?v=20261122d';
-import { Avionics, ILS } from './avionics.js?v=20261122d';
+import { createTerrainMaterial, Terrain } from './terrain.js?v=20261123a';
+import { GroundOverlay } from './ground.js?v=20261123a';
+import { GrassBlades, CropField } from './blades.js?v=20261123a';
+import { buildAircraft, animateAircraft } from './aircraft.js?v=20261123a';
+import { Panel } from './panel.js?v=20261123a';
+import { Avionics, ILS } from './avionics.js?v=20261123a';
 import { Environment } from './env.js';
 import { buildAirports, RockField, Forest, GrassField } from './world.js';
-import { Scenery } from './scenery.js?v=20261122d';
-import { Traffic } from './traffic.js?v=20261122d';
-import { buildLife } from './life.js';
-import { MovingMap } from './map.js?v=20261122d';
+import { Scenery } from './scenery.js?v=20261123a';
+import { Traffic } from './traffic.js?v=20261123a';
+import { buildLife } from './life.js?v=20261123a';
+import { MovingMap } from './map.js?v=20261123a';
 import { Sound } from './audio.js';
 import { setAniso } from './textures.js';
-import { ATC } from './atc.js?v=20261122d';
+import { ATC } from './atc.js?v=20261123a';
 import { initCesium, syncCesiumCamera, getCesiumElevationWorld, warmCesiumTerrain } from './cesium.js?v=20261120';
 
 const $ = (id) => document.getElementById(id);
@@ -110,6 +112,7 @@ class LocalAirports {
 }
 
 let airportStreamTick = 0;
+let ground = null, blades = null, crops = null;
 let env, terrain, terrainMat, aircraft, airports, rocks, forest, grass, town, life, mmap, scenery, traffic;
 const loadBar = $('loadBar'), loadText = $('loadText');
 let loadMode = null;
@@ -143,9 +146,15 @@ async function init() {
     terrainMat = null;
     terrain = null;
   } else {
+    if (loadMode === 'light') {
+      ground = new GroundOverlay();
+      if (!(await ground.init('./data/'))) ground = null;
+      sim.ground = ground;
+    }
     terrainMat = await createTerrainMaterial(
       (p) => progress(0.38 + p * 0.12, 'Loading terrain textures…'),
       loadMode === 'light' ? 512 : 1024,
+      ground ? ground.uniforms : null,
     );
     terrain = loadMode === 'light'
       ? new Terrain(scene, terrainMat, { radius: LIGHT_RADIUS, maxTileSize: 4096, minTileSize: 256, lodScale: 1.0 })
@@ -195,13 +204,25 @@ async function init() {
     progress(0.86, 'Using live aerial road and city detail…');
   } else {
     if (loadMode === 'light') {
+      if (ground) {
+        progress(0.70, 'Mapping fields, yards, streets and driveways…');
+        await ground.ready(sim.fdm.pos[0], sim.fdm.pos[2]);
+        blades = new GrassBlades(scene, ground);
+        crops = new CropField(scene, ground);
+        await crops.init();
+      }
       progress(0.72, 'Growing trees…');
       forest = new Forest(scene, renderer);
+      if (ground) {
+        // no wild forest on real fields, vineyards, orchards, lawns, golf courses, parking lots or driveways
+        const NOF = new Set([1, 3, 4, 5, 7, 8, 10, 11, 12, 13, 14, 15, 16, 22, 23, 24, 25, 26, 28]);
+        forest.reject = (x, z) => { const g = ground.sample(x, z); return !!g && (g.cov > 0.15 || NOF.has(g.cls)); };
+      }
       await forest.init(0.45);
       rocks = new RockField(scene);
       await rocks.init(0.4);
       progress(0.80, 'Laying out roads, streets and buildings…');
-      scenery = new Scenery(scene, { light: true, quality: 0.6 });
+      scenery = new Scenery(scene, { light: true, quality: 0.6, ground });
       await scenery.init();
       progress(0.86, 'Using reduced scenery detail…');
     } else {
@@ -222,7 +243,8 @@ async function init() {
     }
   }
   progress(0.92, 'Adding vehicles and airport activity…');
-  life = await buildLife(scene, { cars: loadMode === 'light' ? 160 : 380, streets: scenery ? (x, z, r) => scenery.streetsNear(x, z, r) : null });
+  const realFarms = ground ? await fetch('./data/farms.json?v=20261123a').then((r) => r.json()).catch(() => null) : null;
+  life = await buildLife(scene, { cars: loadMode === 'light' ? 160 : 380, streets: scenery ? (x, z, r) => scenery.streetsNear(x, z, r) : null, realFarms, flatStreets: !!ground });
   if (loadMode === 'light') life.quality = 0.55;
   sim.life = life;
   progress(0.93, 'Air traffic…');
@@ -1025,6 +1047,9 @@ function frame(dtReal) {
   }
   if (forest && rocks) { forest.update(camPos, 3); rocks.update(camPos, 3); }
   if (grass) grass.update(camPos, agl);
+  if (ground) ground.update(camPos, agl);
+  if (blades) blades.update(camPos, agl, t, sim.windVec, camera);
+  if (crops) crops.update(camPos, agl);
   if (life) life.update(camPos, sim.paused ? 0 : dt * (sim.started ? sim.simRate : 1), t);
   if (scenery) scenery.update(camPos);
   if (traffic) { traffic.setNight(sim.night); traffic.update(sim.paused ? 0 : dt * (sim.started ? sim.simRate : 1), camPos); }
@@ -1053,6 +1078,7 @@ function frame(dtReal) {
   if (!sim.noRender) renderer.render(scene, camera);
   frames++; fpsT += dtReal; if (fpsT > 0.5) { fpsVal = frames / fpsT; frames = 0; fpsT = 0; if (!$('fps').classList.contains('hidden')) $('fps').textContent = `${fpsVal.toFixed(0)} fps\n${renderer.info.render.calls} calls\n${(renderer.info.render.triangles / 1e6).toFixed(2)} M tris${terrain ? `\ntiles ${terrain.visibleCount}` : ''}`; }
 }
+sim.frame = frame;
 function loop() {
   const now = performance.now(); const dt = (now - last) / 1000; last = now;
   if (sim.ready && !MANUAL) frame(dt);

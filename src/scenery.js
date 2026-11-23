@@ -54,7 +54,20 @@ function roadTexture(kind, lanes, oneway, w, sidewalk = 0) {
 const matCache = new Map();
 function roadMaterial(kind, lanes, oneway, w, sidewalk) {
   const t = roadTexture(kind, lanes, oneway, w, sidewalk); let m = matCache.get(t.uuid);
-  if (!m) { m = new THREE.MeshStandardMaterial({ map: t, roughness: 0.92, metalness: 0, polygonOffset: true, polygonOffsetFactor: kind === 'street' ? -2 : -3, polygonOffsetUnits: kind === 'street' ? -2 : -4 }); matCache.set(t.uuid, m); }
+  if (!m) {
+    m = new THREE.MeshStandardMaterial({ map: t, roughness: 0.92, metalness: 0 });
+    // polygonOffset is ignored with the logarithmic depth buffer: pull the ribbon towards the camera along
+    // the view ray instead (more at grazing angles and distance) so it never sinks into the terrain mesh
+    m.onBeforeCompile = (sh) => {
+      sh.vertexShader = sh.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
+  { float dd = length(mvPosition.xyz); vec3 nV = normalize(normalMatrix * vec3(0.,1.,0.));
+    float graze = 1.0 - abs(dot(nV, -mvPosition.xyz / dd));
+    float bias = (0.12 + dd * 0.0022) * (0.15 + 0.85 * graze);
+    mvPosition.xyz *= max(0.0, (dd - bias) / dd); gl_Position = projectionMatrix * mvPosition; }`);
+    };
+    m.customProgramCacheKey = () => 'roadbias';
+    matCache.set(t.uuid, m);
+  }
   return m;
 }
 
@@ -108,7 +121,7 @@ const SHOP_COL = ['#d9d4ca', '#c8c2b8', '#e6e1d8', '#bdb4a6', '#d1cbc0', '#a8a39
 
 export class Scenery {
   constructor(scene, opts = {}) {
-    this.scene = scene; this.light = !!opts.light; this.group = new THREE.Group(); this.group.name = 'scenery'; scene.add(this.group);
+    this.scene = scene; this.light = !!opts.light; this.ground = opts.ground || null; this.group = new THREE.Group(); this.group.name = 'scenery'; scene.add(this.group);
     this.roadR = this.light ? 6500 : 12000; this.cellR = this.light ? 1900 : 3200;
     this.roadTiles = new Map(); this.cells = new Map(); this.streetTiles = new Map(); this.bldTiles = new Map(); this.night = 0;
     this.quality = opts.quality ?? 1; this.busy = false;
@@ -337,7 +350,7 @@ export class Scenery {
     const groups = new Map();
     const lights = []; const trees = []; const houses = []; const shops = [];
     const TOWNY = (x, z) => townAt(x, z);
-    for (const { r, idx } of cellWays) {
+    if (!this.ground) for (const { r, idx } of cellWays) {
       const sw = TOWNY(r.pts[idx[0] * 2], r.pts[idx[0] * 2 + 1]) > 0.25 ? 2.2 : 0;
       const key = [r.kind === 'tertiary' ? 2 : 1, r.w, sw].join('|');
       let G = groups.get(key); if (!G) groups.set(key, (G = { lanes: r.kind === 'tertiary' ? 2 : 1, w: r.w, sw, o: { P: [], U: [], I: [] } }));
@@ -388,13 +401,16 @@ export class Scenery {
       if (rg) { const m = new THREE.Mesh(rg, this.flatRoofMat); m.receiveShadow = true; obj.add(m); }
     }
     // ---- trees: every OSM-mapped tree, plus canopy trees where ESA WorldCover maps tree cover inside town
-    for (const t of bld.trees) if (inCell(t.x, t.z) && free(t.x, t.z)) trees.push([t.x, t.z, Math.max(5, t.h), ((t.x * 3.7 + t.z) % 1 + 1) % 1]);
+    // the OSM ground overlay knows every driveway, pool, parking lot and sports field: keep trees off them
+    const GR = this.ground, NOTREE = new Set([1, 4, 11, 12, 13, 14, 15, 22, 23, 26, 28]);
+    const gfree = (x, z) => { if (!GR) return true; const g = GR.sample(x, z); return !g || (g.cov < 0.2 && !NOTREE.has(g.cls)); };
+    for (const t of bld.trees) if (inCell(t.x, t.z) && free(t.x, t.z) && gfree(t.x, t.z)) trees.push([t.x, t.z, Math.max(5, t.h), ((t.x * 3.7 + t.z) % 1 + 1) % 1]);
     const STEP = 11;
     for (let z = z0 + STEP / 2; z < z1 && trees.length < 2600; z += STEP) for (let x = x0 + STEP / 2; x < x1; x += STEP) {
       const jx = x + (rnd() - 0.5) * STEP * 0.8, jz = z + (rnd() - 0.5) * STEP * 0.8, rr = rnd();
       if (TOWNY(jx, jz) < 0.2) continue;
       const f = forestAt(jx, jz, 0, 0); if (rr > f * 0.9) continue;
-      if (!free(jx, jz) || pavedAt(jx, jz)) continue;
+      if (!free(jx, jz) || pavedAt(jx, jz) || !gfree(jx, jz)) continue;
       trees.push([jx, jz, 6 + rnd() * 9, rnd()]);
     }
     // ---- instanced meshes
