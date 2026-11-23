@@ -333,7 +333,7 @@ export class Panel {
     this.I = C172 ? {
       asi: [330, 175, 74], ai: [505, 175, 74], alt: [680, 175, 74], cdi1: [868, 175, 72],
       tc: [330, 355, 74], dg: [505, 355, 74], vsi: [680, 355, 74], cdi2: [868, 355, 72],
-      tach: [330, 532, 72], adf: [868, 532, 70],
+      tach: [680, 532, 72], adf: [868, 532, 70],
     } : {
       asi: [215, 165, 70], ai: [385, 165, 70], alt: [640, 165, 70], cdi1: [810, 165, 68],
       tc: [215, 345, 70], dg: [385, 345, 70], vsi: [640, 345, 70], adf: [810, 345, 66],
@@ -388,10 +388,8 @@ export class Panel {
     g.strokeStyle = 'rgba(255,255,255,0.06)'; g.lineWidth = 1.5; roundRect(g, 993, 695, 328, 318, 10); g.stroke();
     // placards
     g.fillStyle = '#0d0d0d'; roundRect(g, 74, 30, 140, 24, 3); g.fill(); engrave(g, 'N172SP', 144, 42, 15, '#e8e8e8', 'center', 700);
-    engrave(g, 'MANEUVERING SPEED  105 KIAS', 610, 30, 10.5, '#d8d8d2');
+    engrave(g, 'MANEUVERING SPEED  105 KIAS', 420, 30, 10.5, '#d8d8d2');
     engrave(g, 'THIS AIRPLANE IS APPROVED FOR DAY-NIGHT VFR / IFR', 1690, 40, 10.5, '#d8d8d2');
-    // annunciator bezel area
-    g.fillStyle = '#070707'; roundRect(g, 410, 52, 380, 34, 4); g.fill();
     // yoke shaft bushing (pilot side) & copilot
     for (const xx of [493, 1555]) { const gr = g.createRadialGradient(xx, 610, 6, xx, 610, 40); gr.addColorStop(0, '#000'); gr.addColorStop(0.6, '#0b0b0b'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.beginPath(); g.arc(xx, 610, 40, 0, Math.PI * 2); g.fill(); }
     // copilot side: data plate, fuel placard
@@ -503,6 +501,32 @@ export class Panel {
     return null;
   }
 
+  /** Where is control `id`? Returns { world: THREE.Vector3, canvas: [x, y, r] | null } or null.
+   *  ids: canvas hotspot ids (spmaster, rkbeacon, cbFLAP, baro …), 3D control ids (throttle, mixture, ignition …)
+   *  or gauge:<oil|fuel|vac|asi|tach>. */
+  locate(id) {
+    const panel = this.panelMesh; if (!panel) return null;
+    const toWorld = (x, y, z = 0.004) => panel.localToWorld(new THREE.Vector3((x / PW - 0.5) * PANEL_W, (0.5 - y / PH_) * PANEL_H, z));
+    if (id.startsWith('gauge:')) {
+      const k = id.slice(6), C = this.type === 'C172';
+      const G = C ? { oil: [80, 412, 50], fuel: [80, 300, 50], vac: [184, 412, 50], egt: [184, 300, 50] } : { oil: [748 + 85, 558, 50], fuel: [560 + 85, 558, 50], vac: [88, 300, 42] };
+      const c = G[k] || (k === 'asi' ? this.I.asi : k === 'tach' ? this.I.tach : null); if (!c) return null;
+      return { world: toWorld(c[0], c[1]), canvas: [c[0], c[1], (c[2] || 50) + 6] };
+    }
+    const h = this.hot.find((q) => q.id === id);
+    if (h) { const c = h.r != null ? [h.cx, h.cy, h.r + 6] : [h.x + h.w / 2, h.y + h.h / 2, Math.max(h.w, h.h) / 2 + 8]; return { world: toWorld(c[0], c[1]), canvas: c }; }
+    const m = this.hot3d.find((o) => o.userData.hot?.id === id);
+    if (m) { const v = new THREE.Vector3(); const bb = new THREE.Box3().setFromObject(m); if (!bb.isEmpty()) bb.getCenter(v); else m.getWorldPosition(v); return { world: v, canvas: null, size: bb.isEmpty() ? 0.04 : Math.min(0.12, bb.getSize(new THREE.Vector3()).length() * 0.6) }; }
+    return null;
+  }
+  // pulsing ring drawn over a canvas control (set by locate/show-me)
+  drawHighlight(g, t) {
+    const h = this.hl; if (!h || now() > h.until) return;
+    const k = 0.5 + 0.5 * Math.sin(t * 7);
+    g.save(); g.strokeStyle = `rgba(255,214,0,${0.55 + 0.45 * k})`; g.lineWidth = 5; g.shadowColor = '#ffd600'; g.shadowBlur = 14;
+    g.beginPath(); g.arc(h.x, h.y, h.r + 4 + k * 5, 0, Math.PI * 2); g.stroke(); g.restore();
+  }
+
   // ---------------------------------------------------------------- radios: hotspots
   radioHot(add, rect, circ, sim, step) {
     const av = () => sim.av, f = () => sim.fdm, R = this.R, { x: sx } = this.stack;
@@ -605,6 +629,7 @@ export class Panel {
   attach(aircraft, sim) {
     this.sim = sim;
     const parts = aircraft.userData.parts; const panel = parts.panel; if (!panel) return;
+    this.panelMesh = panel;
     this.hot3d = []; this.anims = [];
     const P = (x, y, z = 0) => new THREE.Vector3((x / PW - 0.5) * PANEL_W, (0.5 - y / PH_) * PANEL_H, z);
     const std = (color, rough = 0.5, metal = 0) => new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal });
@@ -731,6 +756,7 @@ export class Panel {
     this.drawInstruments(g, ctx);
     this.drawRadios(g, ctx);
     for (const c of this.comps) c.dyn?.(g, ctx);
+    this.drawHighlight(g, t);
   }
 
   drawInstruments(g, { f, av, t, att, E, sim }) {
@@ -1174,6 +1200,30 @@ proto.layout = function () {
       const gl = g.createLinearGradient(x, y, x + w * 0.5, y + h); gl.addColorStop(0, 'rgba(255,255,255,0.10)'); gl.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gl; roundRect(g, x + 2, y + 2, w - 4, h - 4, 6); g.fill();
     },
   });
+  // round dual-pointer engine gauge (172S Fig. 7-2 items 1-4): two sub-scales side by side, pivots low-left / low-right
+  const roundDual = (x, y, R, L, Rt, title) => C.push({
+    st: (g) => {
+      well(g, x, y, R, { lip: 5, screws: false }); face(g, x, y, R);
+      for (const [S, side] of [[L, -1], [Rt, 1]]) {
+        const cx = x + side * R * 0.45, cy = y + R * 0.3, r = R * 0.55;
+        const A = (v) => side * (-42 + (clamp(v, S.lo, S.hi) - S.lo) / (S.hi - S.lo) * 84) * -1 + 0;
+        for (const [a, b, c] of S.ranges || []) { const a0 = A(a), a1 = A(b); arc(g, cx, cy, r, Math.min(a0, a1), Math.max(a0, a1), 4, c); }
+        for (let i = 0; i <= (S.ticks || 4); i++) tick(g, cx, cy, r - 6, r + 2, A(S.lo + (S.hi - S.lo) * i / (S.ticks || 4)), 1.5, '#e8e8e8');
+        if (S.labs) S.labs.forEach(([v, sl]) => label(g, cx, cy, r - 13, A(v), sl, 8, '#ddd'));
+        text(g, S.name, x + side * R * 0.42, y + R * 0.62, 7, '#cfcfcf', 'center', 700);
+      }
+      if (title) text(g, title, x, y - R * 0.5, 7, '#9a9a9a', 'center', 700);
+    },
+    dyn: (g, ctx) => {
+      for (const [S, side] of [[L, -1], [Rt, 1]]) {
+        const cx = x + side * R * 0.45, cy = y + R * 0.3, r = R * 0.55;
+        const a = -side * (-42 + (clamp(S.val(ctx), S.lo, S.hi) - S.lo) / (S.hi - S.lo) * 84);
+        S._n = (S._n ?? a) + (a - (S._n ?? a)) * 0.2;
+        needle(g, cx, cy, S._n, r + 1, 2.6, '#f4f4f4', 3); hub(g, cx, cy, 3.5);
+      }
+      glass(g, x, y, R);
+    },
+  });
   const elecOK = ({ f }) => f.elec && f.sys.cb?.['INST'] !== false;
   const fuelCap = C172 ? 26 : 24;
   const fuelL = { name: 'L', lo: 0, hi: fuelCap, ranges: [[0, fuelCap * 0.12, '#d8241c']], labs: [[0, 'E'], [fuelCap, 'F']], val: (c) => (elecOK(c) ? c.f.sys.fuelL : 0) };
@@ -1182,15 +1232,21 @@ proto.layout = function () {
   const oilP = { name: 'OIL PSI', lo: 0, hi: 115, ranges: [[0, 20, '#d8241c'], [50, 90, '#1fa83c'], [100, 115, '#d8241c']], val: (c) => c.f.eng.oilP };
 
   if (C172) {
-    // ---- left engine-instrument column (items 1-5)
-    dual(36, 238, 170, 78, fuelL, fuelR, 'FUEL QTY  U.S. GAL');
-    dual(36, 328, 170, 78, oilT, oilP);
-    dual(36, 418, 170, 78, { name: 'EGT', lo: 1000, hi: 1700, ticks: 7, val: (c) => (elecOK(c) ? c.f.eng.egt : 1000) }, { name: 'FUEL GPH', lo: 0, hi: 19, ranges: [[0, 12, '#1fa83c']], labs: [[0, '0'], [19, '19']], val: (c) => (elecOK(c) ? c.f.eng.ff || 0 : 0) });
-    dual(36, 508, 170, 78, { name: 'VAC', lo: 3, hi: 7, ranges: [[4.5, 5.5, '#1fa83c']], labs: [[3, '3'], [7, '7']], val: (c) => c.f.eng.vac }, { name: 'AMPS', lo: -60, hi: 60, labs: [[-60, '-'], [60, '+']], val: (c) => (c.f.elec ? c.f.eng.amps || 0 : 0) });
+    // ---- engine instrument cluster, far left (POH Fig. 7-2 items 1-4): 2 x 2 round dual gauges
+    // top: fuel quantity L/R, EGT / fuel flow; bottom: oil temp / oil pressure, vacuum / ammeter
+    const egt = { name: 'EGT', lo: 1000, hi: 1700, ticks: 7, val: (c) => (elecOK(c) ? c.f.eng.egt : 1000) };
+    const ff = { name: 'GPH', lo: 0, hi: 19, ranges: [[0, 12, '#1fa83c']], labs: [[0, '0'], [19, '19']], val: (c) => (elecOK(c) ? c.f.eng.ff || 0 : 0) };
+    const vac = { name: 'VAC', lo: 3, hi: 7, ranges: [[4.5, 5.5, '#1fa83c']], labs: [[3, '3'], [7, '7']], val: (c) => c.f.eng.vac };
+    const amps = { name: 'AMPS', lo: -60, hi: 60, labs: [[-60, '-'], [60, '+']], val: (c) => (c.f.elec ? c.f.eng.amps || 0 : 0) };
+    roundDual(80, 300, 50, fuelL, fuelR, 'FUEL QTY GAL');
+    roundDual(184, 300, 50, egt, ff, 'EGT · FUEL FLOW');
+    roundDual(80, 412, 50, oilT, oilP, 'OIL');
+    roundDual(184, 412, 50, vac, amps, 'VAC · AMPS');
+    C.push({ st: (g) => { engrave(g, 'WARNING: CHECK FUEL QUANTITY', 132, 486, 7.5, '#cfcfca'); engrave(g, 'BEFORE EACH FLIGHT', 132, 498, 7.5, '#cfcfca'); } });
     // Davtron digital clock / OAT / voltmeter (item 5)
     this.clockComp(C, 121, 134, rect, circ);
     // annunciator panel (item 13) + TST/DIM switch
-    this.annunciator172(C, 410, 52, rect);
+    this.annunciator172(C, 596, 18, rect);
     // ---- lower panel: ignition, master, avionics master, switches, breakers
     C.push({ st: (g) => { // ignition switch plate
       const x = 85, y = 852; const gr = g.createRadialGradient(x, y, 10, x, y, 44); gr.addColorStop(0, '#1b1c1e'); gr.addColorStop(1, '#0a0a0b'); g.fillStyle = gr; g.beginPath(); g.arc(x, y, 42, 0, 7); g.fill();
@@ -1198,9 +1254,25 @@ proto.layout = function () {
       engrave(g, 'IGNITION', x, y + 54, 10, '#eee', 'center', 700);
     } });
     split(178, 852, ['alternator', 'master'], ['ALT', 'BAT'], 'MASTER', 'red', (s, k) => { if (k === 'alternator' && s.alternator) s.master = true; if (k === 'master' && !s.master) s.alternator = false; });
-    split(258, 852, ['avionics', 'avionics2'], ['BUS 1', 'BUS 2'], 'AVIONICS', 'black');
-    const sw = [['fuelPump', 'FUEL', 'PUMP'], ['beacon', 'BCN'], ['landing', 'LAND'], ['taxi', 'TAXI'], ['nav', 'NAV'], ['strobe', 'STROBE'], ['pitotHeat', 'PITOT', 'HEAT']];
-    sw.forEach(([k, l, sub], i) => rocker(352 + i * 54, 846, k, l, { sub }));
+    // switch/breakers (POH 7: toggle switches that double as breakers, UP = ON), then the split AVIONICS master
+    const swBrk = (x, y, key, lab, sub, amps) => C.push({
+      st: (g) => { engrave(g, lab, x, y - 40, 9.5, '#eeeeea', 'center', 700); if (sub) engrave(g, sub, x, y - 29, 8, '#cfcfca'); engrave(g, amps + '', x, y + 38, 7.5, '#cfcfca'); },
+      dyn: (g, { f }) => {
+        const on = !!f.sys[key], dn = self.isDown('rk' + key);
+        g.fillStyle = '#070707'; roundRect(g, x - 13, y - 22, 26, 44, 3); g.fill();
+        const gr = g.createLinearGradient(x - 10, 0, x + 10, 0); gr.addColorStop(0, '#2b2c2e'); gr.addColorStop(0.5, '#4a4b4d'); gr.addColorStop(1, '#1b1c1d');
+        g.fillStyle = gr; roundRect(g, x - 10, y - 19, 20, 38, 2); g.fill();
+        g.fillStyle = '#0c0c0c'; g.fillRect(x - 3, y - 3, 6, 6);
+        // lever (white tip) pivots in the centre; drawn up for ON
+        const L = on ? -15 : 15; g.save(); if (dn) g.translate(0.6, 0.8);
+        g.strokeStyle = '#bfc1c3'; g.lineWidth = 5; g.lineCap = 'round'; g.beginPath(); g.moveTo(x, y); g.lineTo(x, y + L); g.stroke();
+        g.fillStyle = '#f2f2ee'; roundRect(g, x - 5, y + L - (on ? 5 : 3), 10, 8, 3); g.fill(); g.restore(); g.lineCap = 'butt';
+      },
+      hot: (add, sim) => add(rect(x - 16, y - 26, 32, 52), 'rk' + key, { click: () => { const s = sim.fdm.sys; s[key] = !s[key]; }, tip: () => `${lab} ${sub || ''} switch/breaker (${amps} A) — ${sim.fdm.sys[key] ? 'ON (up)' : 'OFF (down)'}` }),
+    });
+    const sw = [['fuelPump', 'FUEL', 'PUMP', 5], ['beacon', 'BCN', '', 5], ['landing', 'LAND', '', 15], ['taxi', 'TAXI', '', 10], ['nav', 'NAV', '', 5], ['strobe', 'STROBE', '', 5], ['pitotHeat', 'PITOT', 'HEAT', 10]];
+    sw.forEach(([k, l, sub, a], i) => swBrk(272 + i * 52, 856, k, l, sub, a));
+    split(668, 852, ['avionics', 'avionics2'], ['BUS 1', 'BUS 2'], 'AVIONICS', 'black');
     breakers(CB_172_MAIN, 342, 936, 46);
     breakers(CB_172_AVN, 48, 702, 52, 5, 56);
     C.push({ st: (g) => { engrave(g, 'AVIONICS', 152, 664, 10, '#eee', 'center', 700); engrave(g, 'PULL OFF', 152, 676, 7.5, '#cfcfca'); engrave(g, 'BREAKERS — PUSH TO RESET', 660, 1004, 9, '#cfcfca'); } });
@@ -1291,28 +1363,35 @@ proto.clockComp = function (C, x, y, rect, circ) {
 
 // ---- 172S annunciator panel
 proto.annunciator172 = function (C, x, y, rect) {
+  // 172S annunciator (POH 7, item 13): two rows above the altimeter, TST / DIM-BRT toggle on the right
   const self = this;
-  const cells = [['L LOW FUEL', 'amber'], ['OIL PRESS', 'red'], ['LOW VAC', 'amber'], ['VOLTS', 'red'], ['LOW FUEL R', 'amber']];
+  const cells = [['L LOW FUEL', 'amber', 0, 0], ['OIL PRESS', 'red', 1, 0], ['LOW FUEL R', 'amber', 2, 0], ['L VAC', 'amber', 0, 1], ['VOLTS', 'red', 1, 1], ['VAC R', 'amber', 2, 1]];
+  const W = 52, H = 18;
   C.push({
     dyn: (g, { f, t }) => {
       const on = f.elec && f.sys.cb?.['WARN'] !== false;
-      const st = [f.sys.fuelL < 5, f.eng.oilP < 20, f.eng.vac < 3.5, f.elec && f.eng.busV < 24.5, f.sys.fuelR < 5];
+      const st = [f.sys.fuelL < 5, f.eng.oilP < 20, f.sys.fuelR < 5, f.eng.vac < 3.0, f.elec && f.eng.busV < 24.5, f.eng.vac < 3.0];
       const test = self.held.annTst;
       const dimF = f.sys.annDim ? 0.55 : 1;
-      cells.forEach(([n, c], i) => {
+      g.fillStyle = '#070707'; roundRect(g, x - 3, y - 3, 3 * (W + 3) + 3, 2 * (H + 3) + 3, 3); g.fill();
+      cells.forEach(([n, c, col, row], i) => {
         const lit = on && (st[i] || test) && !(st[i] && !test && f.time < 10 && Math.floor(t * 3) % 2);
-        const bx = x + 6 + i * 62;
+        const bx = x + col * (W + 3), by = y + row * (H + 3);
         g.fillStyle = lit ? (c === 'red' ? `rgba(255,59,47,${dimF})` : `rgba(255,190,26,${dimF})`) : '#1c1712';
-        roundRect(g, bx, y + 5, 58, 24, 2); g.fill();
-        text(g, n, bx + 29, y + 17, 8.5, lit ? '#2a0800' : '#3e352b', 'center', 800);
+        roundRect(g, bx, by, W, H, 2); g.fill();
+        text(g, n, bx + W / 2, by + H / 2 + 0.5, 7.5, lit ? '#2a0800' : '#3e352b', 'center', 800);
       });
-      // TST / DIM rocker
-      rockerFace(g, x + 330 + 18, y + 17, 18, 30, !!self.held.annTst, 'black', false);
+      // TST (momentary up) / BRT / DIM toggle
+      const tx = x + 3 * (W + 3) + 16, ty = y + H + 1;
+      g.fillStyle = '#060606'; g.beginPath(); g.arc(tx, ty, 7, 0, 7); g.fill();
+      const ang = test ? -1 : f.sys.annDim ? 1 : 0; g.strokeStyle = '#d8d8d8'; g.lineWidth = 4; g.lineCap = 'round'; g.beginPath(); g.moveTo(tx, ty); g.lineTo(tx, ty + (ang === 0 ? -2 : ang * 13)); g.stroke(); g.lineCap = 'butt';
+      g.fillStyle = '#e8e8e8'; g.beginPath(); g.arc(tx, ty + (ang === 0 ? -3 : ang * 13), 3.5, 0, 7); g.fill();
     },
-    st: (g) => { engrave(g, 'TST', x + 348, y - 4, 7.5); engrave(g, 'DIM', x + 348, y + 40, 7.5); },
+    st: (g) => { const tx = x + 3 * (W + 3) + 16; engrave(g, 'TST', tx + 16, y + 3, 7); engrave(g, 'BRT', tx + 16, y + H + 1, 7); engrave(g, 'DIM', tx + 16, y + 2 * H, 7); },
     hot: (add, sim) => {
-      add(rect(x + 336, y + 1, 26, 16), 'annTst', { down: () => { self.held.annTst = true; }, up: () => { self.held.annTst = false; }, tip: 'Annunciator TEST (press and hold)' });
-      add(rect(x + 336, y + 17, 26, 16), 'annDim', { click: () => { sim.fdm.sys.annDim = !sim.fdm.sys.annDim; }, tip: () => `Annunciator DIM — ${sim.fdm.sys.annDim ? 'DIM' : 'BRIGHT'}` });
+      const tx = x + 3 * (W + 3) + 16;
+      add(rect(tx - 10, y - 4, 22, 20), 'annTst', { down: () => { self.held.annTst = true; }, up: () => { self.held.annTst = false; }, tip: 'Annunciator TEST — hold the toggle up: all six lights should come on' });
+      add(rect(tx - 10, y + 16, 22, 24), 'annDim', { click: () => { sim.fdm.sys.annDim = !sim.fdm.sys.annDim; }, tip: () => `Annunciator BRT / DIM — ${sim.fdm.sys.annDim ? 'DIM' : 'BRIGHT'}` });
     },
   });
 };

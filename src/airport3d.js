@@ -396,7 +396,7 @@ export async function buildAirports(scene, envMap, buildAircraftFn, elevationPro
       if (!list.length) return; const lst = list.map((g) => (g.index ? g.toNonIndexed() : g));
       for (const g of lst) for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', 'uvm'].includes(k)) g.deleteAttribute(k);
       const has = (k) => lst.every((g) => g.attributes[k]); for (const g of lst) for (const k of ['uv', 'uvm']) if (!has(k) && g.attributes[k]) g.deleteAttribute(k);
-      const g = mergeGeometries(lst, false); if (!g) return; g.computeBoundingSphere(); const m = new THREE.Mesh(g, mat); m.receiveShadow = true; group.add(m);
+      const g = mergeGeometries(lst, false); if (!g) return; g.computeBoundingSphere(); const m = new THREE.Mesh(g, mat); m.receiveShadow = true; m.userData.pave = true; group.add(m);
     };
     mergeAdd(ag, MATS.apronM); mergeAdd(tg, MATS.taxiM); mergeAdd(lg, MATS.lineM);
     // ---- buildings ----
