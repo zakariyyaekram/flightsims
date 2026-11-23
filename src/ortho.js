@@ -37,7 +37,7 @@ export class OrthoManager {
   load(a) {
     if (this.cache.has(a.icao)) return this.cache.get(a.icao);
     const e = { tex: null, used: 0 };
-    loader.load(`${this.base}${a.icao}.jpg?v=20261123d`, (t) => {
+    loader.load(`${this.base}${a.icao}.jpg?v=20261123g`, (t) => {
       t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = this.maxAniso; t.generateMipmaps = true;
       t.minFilter = THREE.LinearMipmapLinearFilter; t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; t.flipY = false;
       e.tex = t; this.tick = 0;

@@ -1,6 +1,6 @@
 // Airports (runways, markings, taxiways, lights, PAPI, buildings), vegetation, photoscanned rocks, town.
 import * as THREE from 'three';
-import { ORTHO_UNIFORMS, ORTHO_GLSL } from './ortho.js?v=20261123d';
+import { ORTHO_UNIFORMS, ORTHO_GLSL } from './ortho.js?v=20261123g';
 import { heightAt, normalAt, surfaceAt, forestAt, farmAt, WATER_LEVEL, fromLocal, townAt } from './geo.js';
 import { PH, PHM, tex, loadImage } from './textures.js';
 import { hash2, mulberry } from './noise.js';
@@ -128,6 +128,18 @@ function boxUV(w, h, d, scale = 4) {
 // ---------------- Rocks (photoscanned, instanced) ----------------
 function b64(s, T) { const bin = atob(s); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return new T(u8.buffer); }
 
+// decimated copy of a mesh for distant instances (falls back to the original if simplification is unavailable)
+async function lowPoly(g, keep) {
+  try {
+    const { SimplifyModifier } = await import('three/addons/modifiers/SimplifyModifier.js');
+    const n = g.attributes.position.count;
+    const out = new SimplifyModifier().modify(g, Math.floor(n * (1 - keep)));
+    if (!out.attributes.uv || !out.attributes.normal || !out.attributes.position.count) return g;
+    out.computeBoundingSphere();
+    return out;
+  } catch (e) { console.warn('rock LOD unavailable', e); return g; }
+}
+
 export class RockField {
   constructor(scene) { this.scene = scene; this.types = []; this.chunks = new Map(); this.lastCell = null; this.ready = false; }
   async init(quality = 1) {
@@ -148,7 +160,12 @@ export class RockField {
       const im = new THREE.InstancedMesh(g, m, max);
       im.count = 0; im.castShadow = true; im.receiveShadow = true; im.frustumCulled = false;
       this.scene.add(im);
-      this.types.push({ name: n, r, im, max });
+      // far ring: decimated mesh, no shadow casting (the sun's shadow camera only covers ~70 m around the aircraft)
+      const gl = await lowPoly(g, 0.22);
+      const far = new THREE.InstancedMesh(gl, m, max);
+      far.count = 0; far.castShadow = false; far.receiveShadow = true; far.frustumCulled = false;
+      this.scene.add(far);
+      this.types.push({ name: n, r, im, far, max });
     }
     this.ready = true;
   }
@@ -175,7 +192,7 @@ export class RockField {
       tmp.position.set(x, h - sink * scale, z);
       tmp.rotation.set((rnd() - 0.5) * 0.5, rnd() * 6.28, (rnd() - 0.5) * 0.5);
       tmp.scale.set(scale * (0.8 + rnd() * 0.4), scale * (0.6 + rnd() * 0.5), scale * (0.8 + rnd() * 0.4));
-      tmp.updateMatrix(); const o = { type, m: tmp.matrix.clone() }; c.push(o); return o;
+      tmp.updateMatrix(); const o = { type, m: tmp.matrix.clone(), s: scale }; c.push(o); return o;
     };
     for (let i = 0; i < nSmall; i++) { const t = Math.floor(rnd() * 3); add(t, (1 + rnd() * rnd() * 6) * (t === 0 ? 1.2 : 1.8), 0.15); }
     for (let i = 0; i < nBoulder; i++) add(3, 0.5 + rnd() * 1.3 * (0.5 + rocky), 0.25);
@@ -191,19 +208,24 @@ export class RockField {
     if (key === this.lastCell && !this.pending) return;
     this.lastCell = key;
     let built = 0; this.pending = false;
-    const counts = this.types.map(() => 0);
+    const counts = this.types.map(() => 0), fcounts = this.types.map(() => 0);
     for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
-      if (dx * dx + dz * dz > R * R) continue;
+      const d2 = dx * dx + dz * dz;
+      if (d2 > R * R) continue;
       const k = (cx + dx) + ',' + (cz + dz);
       if (!this.chunks.has(k)) { if (built >= budget) { this.pending = true; continue; } built++; }
-      const inner = dx * dx + dz * dz <= 2 * (this.quality ?? 0.65) * 3;
+      const inner = d2 <= 2 * (this.quality ?? 0.65) * 3;
+      const near = d2 <= 4; // ~100 m: full mesh + shadows
+      const dist = Math.max(0, Math.sqrt(d2) - 0.7) * S;
       for (const r of this.chunk(cx + dx, cz + dz)) {
         if (r.peb && !inner) continue;
-        const T = this.types[r.type]; if (counts[r.type] >= T.max) continue;
-        T.im.setMatrixAt(counts[r.type]++, r.m);
+        const T = this.types[r.type];
+        if (near) { if (counts[r.type] < T.max) T.im.setMatrixAt(counts[r.type]++, r.m); continue; }
+        if ((r.s || 1) * 90 < dist) continue; // too small to see at this range
+        if (fcounts[r.type] < T.max) T.far.setMatrixAt(fcounts[r.type]++, r.m);
       }
     }
-    this.types.forEach((T, i) => { T.im.count = counts[i]; T.im.instanceMatrix.needsUpdate = true; });
+    this.types.forEach((T, i) => { T.im.count = counts[i]; T.im.instanceMatrix.needsUpdate = true; T.far.count = fcounts[i]; T.far.instanceMatrix.needsUpdate = true; });
     if (this.chunks.size > 3000) this.chunks.clear();
   }
 }
@@ -293,7 +315,11 @@ export class Forest {
     };
     this.mat = mat;
     const max = Math.round(14000 * quality);
-    this.near = new THREE.InstancedMesh(g, mat, max); this.near.count = 0; this.near.castShadow = true; this.near.receiveShadow = true; this.near.frustumCulled = false; this.nearMax = max;
+    this.near = new THREE.InstancedMesh(g, mat, max); this.near.count = 0; this.near.castShadow = false; this.near.receiveShadow = true; this.near.frustumCulled = false; this.nearMax = max;
+    // only the trees right around the camera render into the (small, aircraft-centred) shadow map
+    const smax = Math.round(max * 0.2);
+    this.shadow = new THREE.InstancedMesh(g, mat, smax); this.shadow.count = 0; this.shadow.castShadow = true; this.shadow.receiveShadow = true; this.shadow.frustumCulled = false; this.shadowMax = smax;
+    this.scene.add(this.shadow);
     // impostor: render one tree to texture
     const imp = this.makeImpostor(g, mat);
     const ig = new THREE.BufferGeometry();
@@ -352,7 +378,7 @@ export class Forest {
     if (key === this.lastKey && !this.pending) return;
     this.lastKey = key; this.pending = false;
     const Rn = Math.ceil(600 / S), Rf = Math.ceil(3200 / S * Math.sqrt(this.quality));
-    let built = 0, nn = 0, nf = 0;
+    let built = 0, nn = 0, nf = 0, ns = 0;
     const order = [];
     for (let dz = -Rf; dz <= Rf; dz++) for (let dx = -Rf; dx <= Rf; dx++) { const d2 = dx * dx + dz * dz; if (d2 <= Rf * Rf) order.push([d2, dx, dz]); }
     order.sort((a, b) => a[0] - b[0]);
@@ -360,13 +386,15 @@ export class Forest {
       const k = (cx + dx) + ',' + (cz + dz);
       if (!this.chunks.has(k)) { if (built >= budget) { this.pending = true; continue; } built++; }
       const list = this.chunk(cx + dx, cz + dz);
-      const near = d2 <= Rn * Rn;
+      const near = d2 <= Rn * Rn, shadowRing = d2 <= 1;
       for (const m of list) {
-        if (near) { if (nn < this.nearMax) this.near.setMatrixAt(nn++, m); }
+        if (shadowRing && ns < this.shadowMax) this.shadow.setMatrixAt(ns++, m);
+        else if (near) { if (nn < this.nearMax) this.near.setMatrixAt(nn++, m); }
         else if (nf < this.farMax) this.far.setMatrixAt(nf++, m);
       }
     }
-    this.near.count = nn; this.far.count = nf;
+    this.near.count = nn; this.far.count = nf; this.shadow.count = ns;
+    this.shadow.instanceMatrix.needsUpdate = true;
     this.near.instanceMatrix.needsUpdate = true; this.far.instanceMatrix.needsUpdate = true;
     if (this.chunks.size > 6000) this.chunks.clear();
   }

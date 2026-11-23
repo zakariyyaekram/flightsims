@@ -75,7 +75,7 @@ export class GroundOverlay {
   }
 
   async init(base = './data/') {
-    const index = await fetch(base + 'ground/index.json?v=20261123d').then((r) => r.json()).catch(() => []);
+    const index = await fetch(base + 'ground/index.json?v=20261123g').then((r) => r.json()).catch(() => []);
     if (!index.length) return false;
     const airport = { rects: [], taxi: [], aprons: [] };
     for (const a of AIRPORTS) {
@@ -88,7 +88,7 @@ export class GroundOverlay {
       for (const ap of a.aprons) airport.aprons.push({ p: ap.p, h: ap.h || [] });
     }
     const base2 = new URL(base, location.href).href;
-    this.worker = new Worker(new URL('./groundWorker.js?v=20261123d', import.meta.url));
+    this.worker = new Worker(new URL('./groundWorker.js?v=20261123g', import.meta.url));
     this.worker.postMessage({ type: 'init', base: base2, index, airport });
     this.worker.onmessage = (e) => this._onData(e.data);
     this.uniforms.uGOon.value = 1;

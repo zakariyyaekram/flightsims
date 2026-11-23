@@ -5,7 +5,7 @@
 //  - CropField: 3D vineyard rows and orchard trees on the real vineyards / orchards near the camera.
 import * as THREE from 'three';
 import { heightAt, WATER_LEVEL } from './geo.js';
-import { GROUND_GLSL } from './ground.js?v=20261123d';
+import { GROUND_GLSL } from './ground.js?v=20261123g';
 
 const RINGS = [
   { patch: 4, n: 10, density: 44, w: 0.04, rIn: 0, rOut: 17 },

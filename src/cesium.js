@@ -74,10 +74,47 @@ async function sampleElevations(cartographics) {
   }
 }
 
+// Streaming: only request what the camera needs, nearest/central first, and stop chasing detail while moving fast.
+const tilesets = [];
+function tuneTileset(ts, sse = 16) {
+  if (!ts) return;
+  ts.userData_baseSSE = sse;
+  const set = (k, v) => { if (k in ts) ts[k] = v; };
+  set('maximumScreenSpaceError', sse);
+  set('dynamicScreenSpaceError', true);         // coarser tiles toward the horizon
+  set('foveatedScreenSpaceError', true);        // load the centre of the view first
+  set('cullRequestsWhileMoving', true);         // skip tiles that will be stale before they arrive
+  set('cullRequestsWhileMovingMultiplier', 60);
+  set('preloadWhenHidden', false);
+  set('cacheBytes', 384 * 1024 * 1024);
+  set('maximumCacheOverflowBytes', 256 * 1024 * 1024);
+  tilesets.push(ts);
+}
+function tuneGlobe(scene) {
+  const g = scene.globe;
+  g.tileCacheSize = 250;            // terrain/imagery tiles kept around after leaving the view
+  g.preloadAncestors = true;        // coarse parents first so there are never holes
+  g.preloadSiblings = false;        // don't fetch tiles just outside the view
+  g.loadingDescendantLimit = 12;
+  g.maximumScreenSpaceError = 2;
+  scene.fog.enabled = true;         // fog also culls / coarsens distant tiles
+  scene.fog.density = 1.6e-4;
+  scene.fog.screenSpaceErrorFactor = 4;
+}
+// called by the frame-rate governor: lower render resolution and tile detail together
+export function setCesiumQuality(scale) {
+  if (!viewer) return;
+  const base = Math.min(window.devicePixelRatio, 1.5);
+  const rs = Math.max(0.4, base * scale);
+  if (Math.abs(viewer.resolutionScale - rs) > 0.01) viewer.resolutionScale = rs;
+  for (const ts of tilesets) ts.maximumScreenSpaceError = (ts.userData_baseSSE || 16) / Math.max(0.4, scale);
+}
+
 async function addDetailedWorldContent(Cesium) {
   if (typeof Cesium.createGooglePhotorealistic3DTileset === 'function') {
     try {
       photorealisticTiles = await Cesium.createGooglePhotorealistic3DTileset();
+      tuneTileset(photorealisticTiles);
       viewer.scene.primitives.add(photorealisticTiles);
       console.info('Loaded photorealistic Google 3D world tiles.');
       return;
@@ -90,6 +127,7 @@ async function addDetailedWorldContent(Cesium) {
     try {
       const osmBuildings = await Cesium.createOsmBuildingsAsync();
       osmBuildings.maximumScreenSpaceError = 8;
+      tuneTileset(osmBuildings, 8);
       viewer.scene.primitives.add(osmBuildings);
       console.info('Loaded Cesium OSM buildings.');
     } catch (error) {
@@ -142,6 +180,7 @@ export async function initCesium() {
     viewer.scene.highDynamicRange = true;
     viewer.scene.globe.depthTestAgainstTerrain = true;
     viewer.resolutionScale = Math.min(window.devicePixelRatio, 1.5);
+    tuneGlobe(viewer.scene);
 
     await addDetailedWorldContent(Cesium);
 

@@ -8,7 +8,7 @@
 import { fbm, simplex } from './noise.js';
 
 const DATA = new URL('../data/', import.meta.url);
-const DV = '?v=20261123d';
+const DV = '?v=20261123g';
 const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 async function json(name) { const r = await fetch(new URL(name + DV, DATA)); if (!r.ok) throw new Error('missing ' + name); return r.json(); }
@@ -96,6 +96,117 @@ export function pointInPoly(x, z, p) {
 function polyArea(p) { let s = 0; for (let i = 0, j = p.length - 1; i < p.length; j = i++) s += (p[j][0] + p[i][0]) * (p[j][1] - p[i][1]); return Math.abs(s / 2); }
 function polyCentroid(p) { let x = 0, z = 0; for (const q of p) { x += q[0]; z += q[1]; } return [x / p.length, z / p.length]; }
 function dirOf(hdg) { const r = hdg * D2R; return [[Math.sin(r), -Math.cos(r)], [Math.cos(r), Math.sin(r)]]; }
+
+// ---------------- airline gates ----------------
+// terminal walls facing the apron, one spot per ~52 m of wall: { x, z (stand centre), wx, wz (wall point), nx, nz (wall normal onto the apron) }
+export function gateSpots(a, max) {
+  const spots = []; const terms = a.buildings.filter((b) => b.k === 'terminal');
+  const onApron = (x, z) => a.aprons.some((ap) => pointInPoly(x, z, ap.p));
+  const nearTaxi = (x, z, d) => a.taxiways.some((t) => !t.lane && t.p.some((q, i) => i && seg(x, z, t.p[i - 1][0], t.p[i - 1][1], q[0], q[1]).d < d));
+  for (const b of terms) {
+    const p = b.p;
+    for (let i = 0; i < p.length - 1 && spots.length < max; i++) {
+      const A = p[i], B = p[i + 1], L = Math.hypot(B[0] - A[0], B[1] - A[1]); if (L < 30) continue;
+      const dx = (B[0] - A[0]) / L, dz = (B[1] - A[1]) / L;
+      for (let s = 20; s < L - 15 && spots.length < max; s += 52) {
+        const x0 = A[0] + dx * s, z0 = A[1] + dz * s;
+        for (const sg of [1, -1]) {
+          const nx = dz * sg, nz = -dx * sg; // try both sides
+          if (pointInPoly(x0 + nx * 4, z0 + nz * 4, p)) continue; // inside the building
+          const cx = x0 + nx * 28, cz = z0 + nz * 28;
+          if (!onApron(cx, cz) || !onApron(x0 + nx * 48, z0 + nz * 48) || nearTaxi(cx, cz, 30)) continue;
+          if (spots.some((q) => Math.hypot(q.x - cx, q.z - cz) < 44)) continue;
+          if (terms.some((tb) => pointInPoly(cx, cz, tb.p) || pointInPoly(x0 + nx * 50, z0 + nz * 50, tb.p))) continue;
+          spots.push({ x: cx, z: cz, wx: x0, wz: z0, nx, nz }); break;
+        }
+      }
+    }
+  }
+  return spots;
+}
+// Airports without an airline terminal in OpenStreetMap get a small commuter terminal: a glass gate building, a concrete
+// apron deep enough for regional jets / narrow-bodies and a paved connector to the nearest taxiway. The site is searched
+// on a 10 m raster that excludes runways (+ safety area), taxiways, existing aprons and the GA ramp, buildings, roads,
+// water and sloping ground; the site closest to the existing taxiways and aprons wins.
+function synthTerminal(a) {
+  if (gateSpots(a, 3).length >= 2) return null;
+  const big = a.runways[0].len; const nG = big >= 1500 ? 4 : big >= 1000 ? 3 : 2; const LMAX = big >= 1500 ? 41 : 33;
+  const W = nG * 52 + 30, TD = 24, AD = LMAX + 7 + (big >= 1500 ? 45 : 36), halfW = W / 2 + 18;
+  const C = 10; let R0 = 0; for (const r of a.runways) R0 = Math.max(R0, Math.hypot(r.x - a.arp[0], r.z - a.arp[1]) + r.len / 2);
+  const ext = R0 + 600, x0 = a.arp[0] - ext, z0 = a.arp[1] - ext, N = Math.ceil(ext * 2 / C);
+  const BL = new Uint8Array(N * N), HB = new Float32Array(N * N), RW = new Uint8Array(N * N);
+  const cell = (x, z) => { const i = Math.floor((x - x0) / C), j = Math.floor((z - z0) / C); return i < 0 || j < 0 || i >= N || j >= N ? -1 : j * N + i; };
+  const mark = (bx0, bz0, bx1, bz1, test, arr = BL) => {
+    for (let j = Math.max(0, Math.floor((bz0 - z0) / C)); j <= Math.min(N - 1, Math.floor((bz1 - z0) / C)); j++)
+      for (let i = Math.max(0, Math.floor((bx0 - x0) / C)); i <= Math.min(N - 1, Math.floor((bx1 - x0) / C)); i++) { const x = x0 + (i + 0.5) * C, z = z0 + (j + 0.5) * C; if (test(x, z)) arr[j * N + i] = 1; }
+  };
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const x = x0 + (i + 0.5) * C, z = z0 + (j + 0.5) * C, k = j * N + i; HB[k] = bil(H, x, z);
+    if (HB[k] < 0.8 || bil(WF, x, z, 1 / 255) > 0.04) BL[k] = 1;
+    else { const rn = roadNear(x, z, 60); if (rn && rn.d < rn.road.w / 2 + 18) BL[k] = 1; }
+  }
+  for (const r of a.runways) {
+    const cl = r.wid / 2 + (r.len >= 1500 ? 85 : 62), e = r.len / 2 + 120, rr = Math.hypot(e, cl);
+    mark(r.x - rr, r.z - rr, r.x + rr, r.z + rr, (x, z) => { const dx = x - r.x, dz = z - r.z; return Math.abs(dx * r.dir[0] + dz * r.dir[1]) < e && Math.abs(dx * r.perp[0] + dz * r.perp[1]) < cl; });
+    const c2 = r.wid / 2 + 6, e2 = r.len / 2 + 30, r2 = Math.hypot(e2, c2);
+    mark(r.x - r2, r.z - r2, r.x + r2, r.z + r2, (x, z) => { const dx = x - r.x, dz = z - r.z; return Math.abs(dx * r.dir[0] + dz * r.dir[1]) < e2 && Math.abs(dx * r.perp[0] + dz * r.perp[1]) < c2; }, RW);
+  }
+  for (const t of a.taxiways) { if (t.lane) continue; const w = t.w / 2 + 14; for (let i = 1; i < t.p.length; i++) { const A = t.p[i - 1], B = t.p[i]; mark(Math.min(A[0], B[0]) - w, Math.min(A[1], B[1]) - w, Math.max(A[0], B[0]) + w, Math.max(A[1], B[1]) + w, (x, z) => seg(x, z, A[0], A[1], B[0], B[1]).d < w); } }
+  const polyBox = (p, m) => { let ax = 1e9, az = 1e9, bx = -1e9, bz = -1e9; for (const q of p) { ax = Math.min(ax, q[0]); az = Math.min(az, q[1]); bx = Math.max(bx, q[0]); bz = Math.max(bz, q[1]); } return [ax - m, az - m, bx + m, bz + m]; };
+  const nearPoly = (p, m) => (x, z) => { if (pointInPoly(x, z, p)) return true; for (let i = 0, l = p.length - 1; i < p.length; l = i++) if (seg(x, z, p[l][0], p[l][1], p[i][0], p[i][1]).d < m) return true; return false; };
+  for (const b of a.buildings) if (b.p.length > 2) { const bb = polyBox(b.p, 14); mark(...bb, nearPoly(b.p, 14)); }
+  const rp = a.ramp; if (rp) mark(rp.x - 140, rp.z - 140, rp.x + 140, rp.z + 140, (x, z) => Math.hypot(x - rp.x, z - rp.z) < 140);
+  // connector targets: taxiway centrelines and existing apron edges
+  const targets = []; for (const t of a.taxiways) if (!t.lane) for (let i = 1; i < t.p.length; i++) targets.push([t.p[i - 1], t.p[i], t.w]);
+  for (const ap of a.aprons) for (let i = 0, l = ap.p.length - 1; i < ap.p.length; l = i++) targets.push([ap.p[l], ap.p[i], 0]);
+  // stay inside the airfield: convex hull of runway corners, taxiways and aprons (relaxed step by step if nothing fits)
+  const hp = []; for (const r of a.runways) for (const su of [-1, 1]) for (const sv of [-1, 1]) hp.push([r.x + r.dir[0] * r.len / 2 * su + r.perp[0] * r.wid / 2 * sv, r.z + r.dir[1] * r.len / 2 * su + r.perp[1] * r.wid / 2 * sv]);
+  for (const t of a.taxiways) if (!t.lane) for (const q of t.p) hp.push(q); for (const ap of a.aprons) for (const q of ap.p) hp.push(q);
+  hp.sort((p, q) => p[0] - q[0] || p[1] - q[1]); const cr = (o, p, q) => (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0]);
+  const lo = [], hi = []; for (const q of hp) { while (lo.length > 1 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+  for (let i = hp.length - 1; i >= 0; i--) { const q = hp[i]; while (hi.length > 1 && cr(hi[hi.length - 2], hi[hi.length - 1], q) <= 0) hi.pop(); hi.push(q); }
+  const hull = lo.slice(0, -1).concat(hi.slice(0, -1)); // counter-clockwise in (x, z)
+  const hullD = (x, z) => { let d = -1e9; for (let i = 0; i < hull.length; i++) { const A = hull[i], B = hull[(i + 1) % hull.length]; const L = Math.hypot(B[0] - A[0], B[1] - A[1]) || 1; d = Math.max(d, -((B[0] - A[0]) * (z - A[1]) - (B[1] - A[1]) * (x - A[0])) / L); } return d; }; // > 0 outside
+  for (const margin of [15, 90, 200, 1e6]) {
+  let best = null;
+  for (const r of a.runways) for (const side of [-1, 1]) {
+    const n = [-r.perp[0] * side, -r.perp[1] * side], t = r.dir; // n: wall normal toward the runway
+    for (let v = r.wid / 2 + 60 + AD; v <= r.wid / 2 + 85 + AD + 420; v += 15) for (let u = -r.len / 2 + halfW; u <= r.len / 2 - halfW; u += 20) {
+      const wx = r.x + t[0] * u - n[0] * v, wz = r.z + t[1] * u - n[1] * v; // wall centre
+      let ok = true, hmin = 1e9, hmax = -1e9;
+      for (let b = -TD - 8; b <= AD + 0.1 && ok; b += 8) for (let s = -halfW; s <= halfW + 0.1; s += 8) {
+        const k = cell(wx + t[0] * s + n[0] * b, wz + t[1] * s + n[1] * b); if (k < 0 || BL[k]) { ok = false; break; }
+        hmin = Math.min(hmin, HB[k]); hmax = Math.max(hmax, HB[k]);
+      }
+      if (!ok || hmax - hmin > 6) continue;
+      if (margin < 1e5) { let out = false; for (const [s2, b2] of [[-halfW, -TD], [halfW, -TD], [halfW, AD], [-halfW, AD]]) if (hullD(wx + t[0] * s2 + n[0] * b2, wz + t[1] * s2 + n[1] * b2) > margin) { out = true; break; } if (out) continue; }
+      // nearest connector target from the apron's runway-side edge
+      const fx = wx + n[0] * AD, fz = wz + n[1] * AD; let bd = 1e9, bp = null;
+      for (const [A, B, w] of targets) { const q = seg(fx, fz, A[0], A[1], B[0], B[1]); const d = q.d - w / 2; if (d < bd) { bd = d; bp = [A[0] + (B[0] - A[0]) * q.t, A[1] + (B[1] - A[1]) * q.t]; } }
+      if (!bp || bd > 320) continue;
+      // the connector must not cross a runway
+      const L = Math.hypot(bp[0] - fx, bp[1] - fz); let cross = false;
+      for (let d = 0; d <= L; d += 5) { const k = cell(fx + (bp[0] - fx) * d / L, fz + (bp[1] - fz) * d / L); if (k >= 0 && RW[k]) { cross = true; break; } }
+      if (cross) continue;
+      const score = bd + 0.15 * (v - r.wid / 2) + 0.05 * Math.hypot(wx - a.arp[0], wz - a.arp[1]);
+      if (!best || score < best.score) best = { score, wx, wz, n, t, fx, fz, bp, r };
+    }
+  }
+  if (best) { a._synthMargin = margin; return placeSynth(a, best, { W, TD, AD, halfW, nG }); }
+  }
+  return null;
+}
+function placeSynth(a, best, { W, TD, AD, halfW, nG }) {
+  const { wx, wz, n, t, fx, fz, bp } = best; const Pq = (s, b) => [wx + t[0] * s + n[0] * b, wz + t[1] * s + n[1] * b];
+  const term = { k: 'terminal', h: 11, mh: 0, roof: null, part: false, n: `${a.name} Terminal`, synth: true, p: [Pq(-W / 2, 0), Pq(W / 2, 0), Pq(W / 2, -TD), Pq(-W / 2, -TD), Pq(-W / 2, 0)] };
+  const apron = { p: [Pq(-halfW, -2), Pq(halfW, -2), Pq(halfW, AD), Pq(-halfW, AD)], h: [], synth: true };
+  // connector: 20 m strip from the apron edge to the taxiway, overlapping both ends
+  const L = Math.hypot(bp[0] - fx, bp[1] - fz) || 1, ux = (bp[0] - fx) / L, uz = (bp[1] - fz) / L, px = -uz * 10, pz = ux * 10;
+  const a0 = [fx - ux * 6, fz - uz * 6], a1 = [bp[0] + ux * 4, bp[1] + uz * 4];
+  const conn = { p: [[a0[0] + px, a0[1] + pz], [a1[0] + px, a1[1] + pz], [a1[0] - px, a1[1] - pz], [a0[0] - px, a0[1] - pz]], h: [], synth: true };
+  a.buildings.push(term); a.aprons.push(apron, conn);
+  return { term, apron, conn, gates: nG };
+}
 
 export const AIRPORTS = APDATA.map((d) => {
   const a = { icao: d.icao, name: d.name, size: d.size, tower: d.towered, twrFreq: d.twr, gndFreq: d.gnd, arp: [d.x, d.z], plane: d.plane };
@@ -270,6 +381,17 @@ ROADS.forEach((r, ri) => {
     }
   }
 });
+// airline terminals for fields that have none in OSM (needs the road index), then grow each extent radius and add the new
+// pavement to the paved-surface grid
+for (const a of AIRPORTS) {
+  a.synthTerminal = synthTerminal(a); if (!a.synthTerminal) continue;
+  for (const ap of [a.synthTerminal.apron, a.synthTerminal.conn]) {
+    let x0 = 1e9, z0 = 1e9, x1 = -1e9, z1 = -1e9; for (const q of ap.p) { x0 = Math.min(x0, q[0]); z0 = Math.min(z0, q[1]); x1 = Math.max(x1, q[0]); z1 = Math.max(z1, q[1]); a.radius = Math.max(a.radius, Math.hypot(q[0] - a.arp[0], q[1] - a.arp[1]) + 150); }
+    for (let gz = Math.floor(z0 / a._G); gz <= Math.floor(z1 / a._G); gz++) for (let gx = Math.floor(x0 / a._G); gx <= Math.floor(x1 / a._G); gx++) {
+      const k = gx * 65536 + gz; let l = a._grid.get(k); if (!l) a._grid.set(k, (l = [])); l.push({ t: 2, p: ap.p, holes: [] });
+    }
+  }
+}
 // coarse 2 km index of whole roads (for streaming traffic / scenery)
 const RB = 2000, roadBins = new Map();
 ROADS.forEach((r, ri) => {
