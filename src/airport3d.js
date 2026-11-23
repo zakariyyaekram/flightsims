@@ -5,6 +5,7 @@ import { heightAt, AIRPORTS, toLocal, fromLocal, pointInPoly } from './geo.js';
 import { mulberry } from './noise.js';
 import { lightMaterial, makePoints, pbr, flattenStatic, pavementMaterial, canvasTex } from './world.js';
 import { airlinerGeometry, airlinerMaterials, airlinerRest } from './airliner.js';
+import { buildGateServices } from './groundservices.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const D2R = Math.PI / 180;
@@ -338,7 +339,7 @@ export async function buildAirports(scene, envMap, buildAircraftFn, elevationPro
     MATS.apronM.polygonOffset = true; MATS.apronM.polygonOffsetFactor = 0; MATS.apronM.polygonOffsetUnits = 0;
   }
   const { asph, conc, B } = MATS;
-  const group = new THREE.Group(); scene.add(group);
+  const group = new THREE.Group(); scene.add(group); const gateFx = [];
   const lightsList = [], papis = [], beacons = [], strobes = [], nightMats = [B.glass, B.office, B.brick, B.hangar, B.house];
   const ownMats = [];
   for (const a of airportList) {
@@ -487,22 +488,23 @@ export async function buildAirports(scene, envMap, buildAircraftFn, elevationPro
     // ---- parked aircraft ----
     if (GATE_MIX[a.icao]) {
       const spots = gateSpots(a, a.icao === 'KSFO' ? 46 : 22); const mix = GATE_MIX[a.icao]; const rnd = mulberry(a.icao.charCodeAt(1) * 99);
-      const byKey = new Map();
+      const byKey = new Map(); const stands = [];
       spots.forEach((s, i) => {
         if (rnd() < 0.22) return; // some gates empty
         let [lv, ty] = mix[Math.floor(rnd() * mix.length)];
         const G = airlinerGeometry(ty); if (G.T.L / 2 + 6 > 40 && rnd() < 0.5) [lv, ty] = mix[0];
-        const key = lv + ty; if (!byKey.has(key)) byKey.set(key, { lv, ty, m: [] });
         // nose ~7 m from the terminal wall
-        const L = airlinerGeometry(ty).T.L; const cx = s.wx + s.nx * (L / 2 + 7), cz = s.wz + s.nz * (L / 2 + 7);
-        const mtx = new THREE.Matrix4().compose(new THREE.Vector3(cx, gh(cx, cz), cz), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(s.nx, s.nz)), new THREE.Vector3(1, 1, 1));
-        byKey.get(key).m.push(mtx);
-        // jet bridge from the wall to the forward left door
-        const jl = 9 + L * 0.06; const jb = new THREE.Mesh(new THREE.BoxGeometry(2.6, 3, jl), B.concrete);
-        const side = 1; const lx = -s.nz * side, lz = s.nx * side;
-        const bx = s.wx + s.nx * (jl / 2 + 1) + lx * 3, bz = s.wz + s.nz * (jl / 2 + 1) + lz * 3;
-        jb.position.set(bx, gh(bx, bz) + 4.6, bz); jb.rotation.y = Math.atan2(s.nx, s.nz); jb.castShadow = true; group.add(jb);
+        const G2 = airlinerGeometry(ty); const L = G2.T.L; const cx = s.wx + s.nx * (L / 2 + 7), cz = s.wz + s.nz * (L / 2 + 7);
+        stands.push({ ...s, cx, cz, ty, lv, G: G2, label: (a.icao === 'KSFO' ? 'BCDEFG'[Math.floor(i / 8) % 6] : a.icao === 'KOAK' ? 'AB'[i % 2] : 'AB'[Math.floor(i / 11) % 2]) + (1 + (i % (a.icao === 'KSFO' ? 8 : 11)) + (a.icao === 'KOAK' ? Math.floor(i / 2) : 0)) });
       });
+      // jet bridges docked to the L1 door, turnaround equipment and animated pushbacks
+      gateFx.push(buildGateServices(a, stands, { group, gh, rnd, major: true })); a._gateStands = stands;
+      for (const st of stands) {
+        if (st.mode === 'push') continue; // animated aircraft built by the gate services
+        const key = st.lv + st.ty; if (!byKey.has(key)) byKey.set(key, { lv: st.lv, ty: st.ty, m: [] });
+        const mtx = new THREE.Matrix4().compose(new THREE.Vector3(st.cx, gh(st.cx, st.cz), st.cz), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(st.nx, st.nz)), new THREE.Vector3(1, 1, 1));
+        byKey.get(key).m.push(mtx);
+      }
       for (const { lv, ty, m } of byKey.values()) {
         const G = airlinerGeometry(ty), M = airlinerMaterials(lv);
         for (const [geo, mat] of [[G.fus, M.fus], [airlinerRest(ty, lv), M.rest]]) {
@@ -589,5 +591,6 @@ export async function buildAirports(scene, envMap, buildAircraftFn, elevationPro
     for (const m of ownMats) { m.userData.markTex?.dispose(); m.dispose(); }
     for (const a of airportList) { delete a.windsock; delete a.windsocks; delete a.towerPos; }
   };
-  return { group, updateLights, parked, dispose };
+  const updateServices = (dt, camPos, t) => { for (const g of gateFx) g.update(dt, camPos, t); };
+  return { group, updateLights, updateServices, parked, dispose };
 }

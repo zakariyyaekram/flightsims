@@ -18,6 +18,8 @@ import { MovingMap } from './map.js?v=20261123a';
 import { Sound } from './audio.js';
 import { setAniso } from './textures.js';
 import { ATC } from './atc.js?v=20261123a';
+import { PlayerGroundServices } from './groundservices.js';
+import { tickGSE } from './gse.js';
 import { initCesium, syncCesiumCamera, getCesiumElevationWorld, warmCesiumTerrain } from './cesium.js?v=20261120';
 
 const $ = (id) => document.getElementById(id);
@@ -109,6 +111,7 @@ class LocalAirports {
     return Promise.all(jobs);
   }
   updateLights(camPos, night, t) { for (const r of this.loaded.values()) r.updateLights(camPos, night, t); }
+  updateServices(dt, camPos, t) { for (const r of this.loaded.values()) r.updateServices?.(dt, camPos, t); }
 }
 
 let airportStreamTick = 0;
@@ -247,6 +250,8 @@ async function init() {
   life = await buildLife(scene, { cars: loadMode === 'light' ? 160 : 380, streets: scenery ? (x, z, r) => scenery.streetsNear(x, z, r) : null, realFarms, flatStreets: !!ground });
   if (loadMode === 'light') life.quality = 0.55;
   sim.life = life;
+  if (!sim.gs) { $('gsChip')?.addEventListener('click', () => sim.gs?.toggle()); }
+  if (!sim.gs) sim.gs = new PlayerGroundServices({ scene, sim, toast, groundH: (x, z) => groundQuery(x, z).h });
   progress(0.93, 'Air traffic…');
   traffic = new Traffic(scene, { light: loadMode === 'light' });
   await traffic.init(buildAircraft);
@@ -332,6 +337,7 @@ let lastSetup = null;
 function applySetup(s, warmOnly = false) {
   lastSetup = s;
   sim.groundServices = { active: false, airport: null };
+  sim.gs?.reset();
   sim.fdm.setAircraft(s.aircraftType === 'C152' ? C152 : C172);
   sim.atc.reset(s);
   sim.atc.enabled = s.atcEnabled !== false;
@@ -517,28 +523,8 @@ window.addEventListener('keydown', (e) => {
     case 'KeyV': if (sh) { S.avionics = !S.avionics; S.avionics2 = S.avionics; toast('Avionics ' + (S.avionics ? 'ON' : 'OFF')); } else { F.ctrl.flaps = Math.max(0, F.ctrl.flaps - 1); toast('Flaps ' + ['UP', '10°', '20°', 'FULL'][F.ctrl.flaps]); } break;
     case 'KeyP': F.ctrl.parkBrake = !F.ctrl.parkBrake; toast('Parking brake ' + (F.ctrl.parkBrake ? 'SET' : 'RELEASED')); break;
     case 'KeyJ':
-      if (walkView()) break;
-      {
-        let nearest = null, nearestDistance = Infinity;
-        for (const a of AIRPORTS) {
-          const distance = Math.hypot(a.ramp.x - F.pos[0], a.ramp.z - F.pos[2]) * 300 / 400;
-          if (distance < nearestDistance) { nearestDistance = distance; nearest = a; }
-        }
-        if (nearestDistance >= 300) {
-          toast('No ground service stand nearby', 3000);
-        } else if (!F.onGround || Math.hypot(F.vel[0], F.vel[2]) >= 1) {
-          toast('Ground services require the aircraft stopped on the ground', 3000);
-        } else if (sh) {
-          sim.groundServices = { active: false, airport: null };
-          F.ctrl.parkBrake = false;
-          toast(`${nearest.icao} ground services disconnected`, 3000);
-        } else {
-          sim.groundServices = { active: true, airport: nearest.icao };
-          F.ctrl.parkBrake = true;
-          S.avionics = true;
-          toast(`${nearest.icao} ground services: GPU, baggage, stairs, catering and tug ready`, 4000);
-        }
-      }
+      if (sh) { sim.gs?.cancelAll(); toast('Ground services: all cancelled', 2000); }
+      else sim.gs?.toggle();
       break;
     case 'KeyI': if (sh) S.mags = Math.max(0, S.mags - 1); else { S.mags = Math.min(4, S.mags + 1); if (S.mags === 4) sim.startHeld = 0.25; } toast('Ignition ' + ['OFF', 'R', 'L', 'BOTH', 'START'][S.mags], 900); break;
     case 'KeyM': if (sh) { const on = !(S.master && S.alternator); S.master = on; S.alternator = on; toast('Master ' + (on ? 'ON' : 'OFF')); } else toggleMap(); break;
@@ -553,23 +539,7 @@ window.addEventListener('keydown', (e) => {
     case 'KeyR':
       if (sh) { av.apButton('APR', F); toast('AP ' + av.ap.lat + (av.ap.gsArmed ? ' (GS armed)' : '')); }
       else if (walkView()) {}
-      else {
-        let nearest = null, nearestDistance = Infinity;
-        for (const a of AIRPORTS) {
-          const distance = Math.hypot(a.ramp.x - F.pos[0], a.ramp.z - F.pos[2]) * 300 / 400;
-          if (distance < nearestDistance) { nearestDistance = distance; nearest = a; }
-        }
-        if (F.onGround && nearestDistance < 300 && Math.hypot(F.vel[0], F.vel[2]) < 1) {
-          const capacity = F.aircraft.fuelCapGal;
-          const before = S.fuelL + S.fuelR;
-          S.fuelL = capacity; S.fuelR = capacity;
-          const added = Math.max(0, capacity * 2 - before);
-          toast(`Ground fuel service · ${nearest.icao} · +${added.toFixed(1)} gal (${(capacity * 2).toFixed(1)} gal total)`, 3000);
-          sim.panelDirty = true;
-        } else {
-          toast(nearestDistance < 300 ? 'Refuel only while stopped on the ground' : 'No ground fuel service nearby', 3000);
-        }
-      }
+      else { sim.gs?.toggle(true); sim.gs?.request('fuel'); }
       break;
     case 'KeyT': if (sh) { av.apButton('ALT', F); toast('AP ' + av.ap.vert); } break;
     case 'KeyY': mouse.yoke = !mouse.yoke; $('yokeChip').classList.toggle('hidden', !mouse.yoke); $('cross').classList.toggle('hidden', !mouse.yoke); toast(mouse.yoke ? 'Mouse yoke ON — mouse position = yoke' : 'Mouse yoke OFF'); break;
@@ -1027,6 +997,7 @@ function frame(dtReal) {
     if (sim.panel) sim.panel.animate(dt);
     sim.apCmd = sim.av.update(F, dt * sim.simRate, powered);
     physics(dt);
+    if (sim.gs) { sim.gs.update(dt * sim.simRate, simT); sim.gs.applyPush(); }
     sim.atc.update(sim, dt * sim.simRate);
     simT += dt * sim.simRate;
     sim.timeOfDay = (lastSetup?.tod ?? 10) + simT / 3600;
@@ -1055,6 +1026,8 @@ function frame(dtReal) {
   if (traffic) { traffic.setNight(sim.night); traffic.update(sim.paused ? 0 : dt * (sim.started ? sim.simRate : 1), camPos); }
   env.update(camera, new THREE.Vector3(F.pos[0], F.pos[1], F.pos[2]), simT, dt);
   if (airports) airports.updateLights(camPos, sim.night, t);
+  if (airports?.updateServices) airports.updateServices(sim.paused ? 0 : dt * (sim.started ? sim.simRate : 1), camPos, t);
+  tickGSE(t, sim.night);
   // windsocks
   const w = sim.windVec || [0, 0, 0]; const ws = Math.hypot(w[0], w[2]);
   for (const a of AIRPORTS) for (const sock of a.windsocks || (a.windsock ? [a.windsock] : [])) { const dir = Math.atan2(-w[2], w[0]); sock.rotation.set(0, dir + Math.sin(t * 2.3) * 0.08 * Math.min(1, ws / 3), -(1 - Math.min(1, ws / 7.7)) * 1.2 + Math.sin(t * 3.1) * 0.03); }
