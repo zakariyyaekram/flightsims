@@ -1,5 +1,6 @@
 // Airports (runways, markings, taxiways, lights, PAPI, buildings), vegetation, photoscanned rocks, town.
 import * as THREE from 'three';
+import { ORTHO_UNIFORMS, ORTHO_GLSL } from './ortho.js?v=20261123g';
 import { heightAt, normalAt, surfaceAt, forestAt, farmAt, WATER_LEVEL, fromLocal, townAt } from './geo.js';
 import { PH, PHM, tex, loadImage } from './textures.js';
 import { hash2, mulberry } from './noise.js';
@@ -71,18 +72,28 @@ export function stripGeometry(a, u0, u1, v0, v1, du = 12, lift = 0.07, groundHei
   return g;
 }
 
-export function pavementMaterial(asph, markTex, tint = 1) {
+export function pavementMaterial(asph, markTex, tint = 1, ortho = 0) {
   const m = new THREE.MeshStandardMaterial({ map: asph.diff, normalMap: asph.nor, roughnessMap: asph.rough, roughness: 1, color: new THREE.Color(tint, tint, tint), normalScale: new THREE.Vector2(0.8, 0.8) });
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uMark = { value: markTex };
+    if (ortho) Object.assign(sh.uniforms, ORTHO_UNIFORMS);
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec2 uvm; varying vec2 vUvm; varying vec3 vWp;')
       .replace('#include <uv_vertex>', '#include <uv_vertex>\nvUvm = uvm;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWp = (modelMatrix*vec4(transformed,1.0)).xyz;');
-    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D uMark; varying vec2 vUvm; varying vec3 vWp;')
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D uMark; varying vec2 vUvm; varying vec3 vWp;' + (ortho ? ORTHO_GLSL : ''))
       .replace('#include <map_fragment>', `#include <map_fragment>
         vec4 mk = texture2D(uMark, vUvm);
         float macro = texture2D(map, vWp.xz*0.0061).g;
         diffuseColor.rgb *= 0.78 + 0.45*macro;
+        ${ortho ? `{ // real pavement tone from the orthophoto, blurred (mip bias) so photo markings don't ghost
+          vec4 oa = orthoAt(vWp.xz, 4.0, 60.0), ob = orthoAt(vWp.xz, 7.5, 60.0);
+          float ol = dot(oa.rgb, vec3(.3,.59,.11)), obl = dot(ob.rgb, vec3(.3,.59,.11)), dl = dot(diffuseColor.rgb, vec3(.3,.59,.11));
+          // clamp bright outliers (parked aircraft, white roofs of hangars that overhang) to the local pavement tone
+          float lt = min(ol, obl * 1.12 + 0.02);
+          vec3 hue = mix(vec3(1.0), ob.rgb / max(obl, 0.02), 0.55);
+          vec3 tone = hue * clamp(lt, 0.04, 0.5);
+          diffuseColor.rgb = mix(diffuseColor.rgb, tone * (0.7 + 0.6 * dl / max(dl + 0.05, 0.1)), oa.a * ${ortho.toFixed(2)});
+        }` : ''}
         float wear = smoothstep(0.25,0.75, texture2D(map, vWp.xz*0.031+0.3).r);
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.86,0.86,0.84), mk.r*(0.80+0.15*wear));
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.78,0.58,0.08), mk.g*(0.85));
@@ -90,6 +101,7 @@ export function pavementMaterial(asph, markTex, tint = 1) {
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.55, max(mk.r,mk.g)); roughnessFactor = mix(roughnessFactor, 0.6, mk.b);');
   };
   m.userData.markTex = markTex;
+  m.customProgramCacheKey = () => 'pave' + ortho;
   return m;
 }
 

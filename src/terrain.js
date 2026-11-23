@@ -2,7 +2,8 @@
 import * as THREE from 'three';
 import { heightAt, forestAt, farmAt, WORLD_HALF, WORLD_CX, WORLD_CZ, WATER_LEVEL, townAt, pavedAt } from './geo.js';
 import { texArray, PH } from './textures.js';
-import { GROUND_GLSL } from './ground.js?v=20261123c';
+import { GROUND_GLSL } from './ground.js?v=20261123g';
+import { ORTHO_UNIFORMS, ORTHO_GLSL } from './ortho.js?v=20261123g';
 
 const N = 32; // segments per tile
 const MIN_SIZE = 128;
@@ -22,6 +23,7 @@ export async function createTerrainMaterial(onProgress, size = 1024, groundUnifo
     uAvg: { value: diff.avg.map((a) => new THREE.Vector3(...a)) },
     uCam: { value: new THREE.Vector3() }, uSnow: { value: 1750 }, uWater: { value: WATER_LEVEL },
     uSeason: { value: 0.0 },
+    ...ORTHO_UNIFORMS,
     ...(groundUniforms || { uGO0: { value: null }, uGO1: { value: null }, uGOr0: { value: new THREE.Vector4() }, uGOr1: { value: new THREE.Vector4() }, uGOon: { value: 0 }, uDry: { value: 0 } }),
   };
   mat.userData.uniforms = uniforms;
@@ -46,6 +48,7 @@ vec3 T2(int l, vec2 p, float s){ vec2 q = mat2(.8,-.6,.6,.8)*p; return mix(T(l,p
 vec3 NT(int l, vec2 uv){ return texture(uNor, vec3(uv, float(l))).xyz*2.-1.; }
 vec3 gTerrainN; float gRough;
 ${GROUND_GLSL}
+${ORTHO_GLSL}
 vec2 rot2(vec2 p, float a){ float c = cos(a), s = sin(a); return vec2(c*p.x + s*p.y, -s*p.x + c*p.y); }
 float hh(float n){ return fract(sin(n*12.9898)*43758.5453); }
 `)
@@ -269,6 +272,20 @@ float hh(float n){ return fract(sin(n*12.9898)*43758.5453); }
     float a = pm > 1.5 ? smoothstep(.15, .9, pcov + (gn - .5)*.4) : smoothstep(.05, .6, pcov);
     col = mix(col, pc, a);
     gWater *= 1.0 - a;
+  }
+  // ---- airport orthophoto (USGS NAIP): real ground colours around each airfield ----
+  {
+    vec4 oa = orthoAt(p, 0.0, 160.0);
+    if (oa.a > 0.0) {
+      // keep some close-range texture from the splat so the 0.6-1 m/px photo doesn't look smeared underfoot
+      float detail = 1.0 + ((vnoise(p*1.9)-.5)*.16 + (vnoise(p*7.3)-.5)*.1) * near;
+      vec3 oc = oa.rgb * 0.92 * detail;
+      col = mix(col, oc, oa.a);
+      float olum = dot(oa.rgb, vec3(.3,.59,.11));
+      // the photo's water (dark, blue-grey) keeps the reflective water shading; dry land does not
+      gWater *= mix(1.0, smoothstep(0.16, 0.06, olum) * step(oa.r, oa.b + 0.02), oa.a);
+      wSnow *= 1.0 - oa.a;
+    }
   }
   // far haze desaturation (Rayleigh is handled by fog)
   col = mix(col, vec3(dot(col, vec3(.3,.59,.11))), (1.-mid)*.25);

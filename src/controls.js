@@ -50,6 +50,7 @@ export const ACTIONS = [
   ['view5', 'Digit5', 'Tower view', 'Sim & views'],
   ['view6', 'Digit6', 'Fly-by view', 'Sim & views'],
   ['view7', 'Digit7', 'Walkaround view', 'Sim & views'],
+  ['taxiMap', 'Digit8', 'Taxi map (airport diagram)', 'Sim & views'],
   ['simRate', 'Digit9', 'Sim rate 1× / 2× / 4×', 'Sim & views'],
   ['recenter', 'Space', 'Recenter view', 'Sim & views'],
   ['help', 'Slash', 'This controls window (pauses the sim)', 'Sim & views'],

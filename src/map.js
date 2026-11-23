@@ -2,7 +2,7 @@
 // are painted from the baked land-cover raster, roads and runways are drawn as vectors on top,
 // with airports, navaids, ILS feathers, place labels, your aircraft and live AI traffic.
 import { AIRPORTS, NAVAIDS, WORLD, RASTER, ROADS, TOWNS, WATER_NAMES, PLACES, TALL, WORLD_HALF } from './geo.js';
-import { ILS } from './avionics.js?v=20261123c';
+import { ILS } from './avionics.js?v=20261123g';
 
 const FT = 0.3048;
 const EXT = Math.max(WORLD.x1 - WORLD.x0, WORLD.z1 - WORLD.z0) / 2;
