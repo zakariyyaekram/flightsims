@@ -72,7 +72,7 @@ const sim = {
   chrono: [{}, {}], stickPriority: null, atcMsg: false, atcLog: [], flapLever: 0, flapConf: 0, gpws: null, tcasRA: null, fcuMetric: false,
   groundSvc: { gpu: false, fuel: false, tug: false, stairs: false },
 };
-window.sim = sim; sim.scene = scene; sim.renderer = renderer; sim.perf = perf;
+window.sim = sim; sim.scene = scene; sim.renderer = renderer; sim.perf = perf; sim.camera = camera;
 sim.atc = new ATC();
 // avionics shim so the shared ATC module can tune / read the A350 radios
 sim.av = {
