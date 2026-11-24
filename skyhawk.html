@@ -309,7 +309,7 @@ window.startEdition = function (mode) {
     window.chooseLoadMode(mode);
     return;
   }
-  import('./src/main.js?v=20261124c').then(() => {
+  import('./src/main.js?v=20261124d').then(() => {
     if (typeof window.chooseLoadMode === 'function') window.chooseLoadMode(mode);
     else if (text) text.textContent = 'Failed to load the flight simulator.';
   }).catch((error) => {
@@ -319,7 +319,7 @@ window.startEdition = function (mode) {
 };
 </script>
 <script src="./src/picker.js?v=20261124a"></script>
-<script type="module" src="./src/main.js?v=20261124c"></script>
+<script type="module" src="./src/main.js?v=20261124d"></script>
 <script data-pplx-inline-edit>
 (function () {
   if (window === window.top) return;
