@@ -148,8 +148,9 @@ export class AFS {
   // FCU or constraint altitude for climb / descent
   altTarget() {
     const fcuAlt = this.fcu.alt;
-    if (this.vert === 'CLB' || this.vert === 'ALT CST*' && this.cstUp) { const c = this.nextConstraint(true); if (c != null && c < fcuAlt) { this.cstAlt = c; return c; } }
-    if (this.vert === 'DES' || this.vert === 'ALT CST*' && !this.cstUp) { const c = this.nextConstraint(false); if (c != null && c > fcuAlt) { this.cstAlt = c; return c; } }
+    if (this.vert === 'ALT CST*' && this.cstAlt != null) return this.cstAlt; // capture target is frozen once ALT CST* engages
+    if (this.vert === 'CLB') { const c = this.nextConstraint(true); if (c != null && c < fcuAlt) { this.cstAlt = c; return c; } }
+    if (this.vert === 'DES') { const c = this.nextConstraint(false); if (c != null && c > fcuAlt) { this.cstAlt = c; return c; } }
     if (this.vert === 'ALT CST' || this.vert === 'ALT CST*') return this.cstAlt ?? fcuAlt;
     return fcuAlt;
   }
@@ -219,6 +220,11 @@ export class AFS {
       const toward = (dh > 0 && vs > 50) || (dh < 0 && vs < -50);
       const capZone = Math.max(120, Math.abs(vs) / 60 * 9);
       if (toward && Math.abs(dh) < capZone) { const cst = tgtAlt !== fcu.alt; this.cstUp = dh > 0; this.setVert(cst ? 'ALT CST*' : 'ALT*'); this.fcu.exped = false; }
+    }
+    // flown through the capture (e.g. FD only, pilot not following): drop the capture and resume the climb/descent
+    if ((this.vert === 'ALT*' || this.vert === 'ALT CST*') && !onG && this.vertT > 3 && Math.abs(dh) > 300 && ((dh < 0 && vs > 300) || (dh > 0 && vs < -300))) {
+      const managed = fms.nav && fms.legs.length; this.cstAlt = null;
+      this.setVert(dh < 0 ? (fcu.alt > altFt ? (managed ? 'CLB' : 'OP CLB') : 'V/S') : (fcu.alt < altFt ? (managed ? 'DES' : 'OP DES') : 'V/S'), vs);
     }
     if ((this.vert === 'ALT*' || this.vert === 'ALT CST*') && Math.abs(dh) < 30 && Math.abs(vs) < 250) this.setVert(this.vert === 'ALT CST*' ? 'ALT CST' : Math.abs(fcu.alt - fms.crzFL * 100) < 60 && fms.phase !== 'APPROACH' ? 'ALT CRZ' : 'ALT');
     if (this.vert === 'ALT CST' && (this.vertArmed.includes('CLB') || this.vertArmed.includes('DES'))) { /* continue after passing constraint */ }
@@ -298,7 +304,7 @@ export class AFS {
       }
       case 'CLB': case 'OP CLB': case 'EXPED CLB': {
         const vt = this.vert === 'EXPED CLB' ? speeds(f.mass, S.confIdx()).gd : Vt;
-        gCmd = speedOnElev(vt, sinG(300), 20 * DEG); break;
+        gCmd = speedOnElev(vt, sinG(300), 20 * DEG); if (ias > vt + 3) nzLim = [0.75, 1.3]; break; // firmer pitch-up when fast (e.g. resuming CLB after a constraint)
       }
       case 'OP DES': case 'EXPED DES': {
         const vt = this.vert === 'EXPED DES' ? Math.min(340, S.vmax() - 10) : Vt;
@@ -393,7 +399,7 @@ export class AFS {
     if (at.active && !f.prot.aFloor) {
       if (!this.prevAthr) this.Pcmd = (f.E[0].P + f.E[1].P) / 2;
       const mode = at.mode;
-      if (mode === 'THR CLB') this.Pcmd = 0.86;
+      if (mode === 'THR CLB') this.Pcmd = this.Pcmd < 0.86 ? Math.min(0.86, this.Pcmd + dt * 0.08) : 0.86; // ramp up to climb thrust over a few seconds, as the real A/THR does
       else if (mode === 'THR IDLE') this.Pcmd = Math.max(0, this.Pcmd - dt * 0.5);
       else if (mode === 'THR LVR') this.Pcmd = 1;
       else {

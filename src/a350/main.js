@@ -21,12 +21,12 @@ import { ATC } from '../atc.js?v=20261124c';
 import { tickGSE, GSE } from '../gse.js';
 import { remap, buildControlsUI, changedCount, mouseSettings, mouseAxis } from '../controls.js?v=20261123g';
 import { PerfMonitor } from '../perf.js?v=20261123g';
-import { initCesium, syncCesiumCamera, getCesiumElevationWorld, warmCesiumTerrain, setCesiumQuality } from '../cesium.js?v=20261123g';
+import { initCesium, syncCesiumCamera, getCesiumElevationWorld, warmCesiumTerrain, setCesiumQuality } from '../cesium.js?v=20261124t';
 import { KT, FT, NM, A350, CONFS, DETENT } from './data.js';
 import { JetFDM } from './fdm.js';
 import { Systems } from './systems.js';
 import { FMS } from './fms.js';
-import { AFS } from './afs.js';
+import { AFS } from './afs.js?v=20261124u';
 import { Displays } from './displays.js';
 import { buildOverhead, buildGlareshield, buildPedestal, buildGearPanel } from './panels.js';
 import { buildCockpit } from './cockpit.js';
@@ -157,6 +157,7 @@ async function init() {
     progress(0.36, 'Loading World Terrain, aerial imagery and 3D buildings…');
   } else progress(0.36, 'Loading local terrain and flight systems…');
   const useLocalScenery = loadMode !== 'heavy' || !cesiumViewer;
+  sim.edition = { mode: loadMode, cesium: !!cesiumViewer, fallback: loadMode === 'heavy' && !cesiumViewer };
   if (useLocalScenery) {
     if (loadMode === 'light') { ground = new GroundOverlay(); if (!(await ground.init('../data/'.replace('../', './')))) ground = null; sim.ground = ground; }
     terrainMat = await createTerrainMaterial((p) => progress(0.38 + p * 0.12, 'Loading terrain textures…'), loadMode === 'light' ? 512 : 1024, ground ? ground.uniforms : null);
@@ -304,7 +305,7 @@ function applySetup(s, warmOnly = false) {
   } else if (sp.air === 'ils') {
     fms.build({ origin: sp.icao === 'KSFO' ? 'KSJC' : 'KSFO', originRwy: sp.icao === 'KSFO' ? '30L' : '28L', dest: sp.icao, destRwy: sp.rwy, crzFL: s.crzFL });
     const e = fms.dest.end; const c = e.hdg * D2R; const d = 11 * NM;
-    pos = { x: e.x - Math.sin(c) * d, z: e.z + Math.cos(c) * d }; hdg = e.hdg; onGround = false; speed = 175; alt = 3000 * FT + (s.qnh - 1013) * 27 * FT; conf = 4;
+    pos = { x: e.x - Math.sin(c) * d, z: e.z + Math.cos(c) * d }; hdg = e.hdg; onGround = false; speed = 165; alt = 3000 * FT + (s.qnh - 1013) * 27 * FT; conf = 5; // CONF FULL, matching the landing data
   } else if (sp.air === 'cruise') {
     fms.build({ origin: 'KSFO', originRwy: '28L', dest: destI === 'KSFO' ? 'KSJC' : destI, destRwy: DESTS[destI === 'KSFO' ? 'KSJC' : destI][1], crzFL: s.crzFL });
     pos = ll2w(37.86, -122.25); hdg = 160; onGround = false; speed = 280; alt = 10000 * FT; gearDown = false;
@@ -322,6 +323,7 @@ function applySetup(s, warmOnly = false) {
   warmCesiumTerrain(pos.x, pos.z);
   F.reset({ pos: [pos.x, onGround ? gh + A350.cgHeight : alt, pos.z], hdg, onGround, running: !cold && !(sp.gate), speedKt: speed, gearDown, slat: cfg.slat, flap: cfg.flap });
   if (onGround) F.settleOnGround?.();
+  else { F.agl = F.ra = Math.max(0, alt - gh); } // radio altitude is valid at once, so the AP can engage on an airborne spawn
   S.reset(cold, { gpu: !!sp.gate });
   if (!cold) for (const k of ['CO', 'CI', 'CU', 'CL', 'FI', 'FO', 'ISIS']) S.du[k] = { t: 30 }; // displays already booted
   if (sp.gate && !cold) { S.master = [false, false]; S.press('EXT1', true); S.press('EXT2', true); S.press('APUGEN', true); }
@@ -830,6 +832,7 @@ $('fly').onclick = () => {
   const sp = SPAWNS[s.spawn]; if (sp?.gate && airports?.loaded?.has(sp.icao) && !airport(sp.icao)._builtReserved) { airport(sp.icao)._builtReserved = true; airports.rebuild(sp.icao); }
   applySetup(s);
   showMenu(false); $('hud').classList.remove('hidden'); $('crash').classList.add('hidden');
+  if (sim.edition?.fallback) toast('Heavy Edition: Cesium World Terrain could not be reached, flying on the local Bay Area scenery instead', 6000);
   sim.started = true; togglePause(false); setView(sim.view === 'walk' ? 'cockpit' : sim.view);
   const msg = sp?.gate ? (sp.cold ? `Parked at the gate, cold & dark. Overhead: BAT 1/2, EXT 1/2 — or Shift+E for auto-start. J = ground services, ? = help.` : 'Parked at the gate with ground power. Shift+E starts the engines. J = ground services.') : sp?.air === 'ils' ? 'Established inbound, AP1+2 with APPR armed — autoland, or press Q to hand-fly.' : sp?.air ? 'Cruising with AP1 on. Shift+arrows set FCU HDG / ALT.' : 'Lined up, engines running, CONF 1+F. Release the brake (P), thrust to FLX (Shift+W twice), rotate at VR.';
   toast(msg, 8000); canvas.focus?.();
@@ -964,7 +967,7 @@ window.advanceTime = (ms) => { const steps = Math.max(1, Math.round(ms / (1000 /
 window.render_game_to_text = () => {
   const F = fdm, a = F.attitude; const m = afs.fma();
   return JSON.stringify({
-    aircraft: 'A350-1000', coords: 'world x=east m, z=south m, y=up m (MSL)', ready: !!sim.ready, started: sim.started, paused: sim.paused, view: sim.view,
+    aircraft: 'A350-1000', edition: sim.edition || null, coords: 'world x=east m, z=south m, y=up m (MSL)', ready: !!sim.ready, started: sim.started, paused: sim.paused, view: sim.view,
     pos: F.pos.map((v) => Math.round(v * 10) / 10), raFt: Math.round((F.ra || 0) / FT), ias: Math.round(F.ind.ias), altFt: Math.round(F.ind.alt), vsFpm: Math.round(F.ind.vsi),
     hdg: Math.round(a.hdg), pitch: +a.pitch.toFixed(1), roll: +a.roll.toFixed(1), n1: F.E.map((e) => Math.round(e.n1)), engines: F.E.map((e) => !!e.running), onGround: !!F.onGround,
     tla: F.ctrl.tla.map((v) => +v.toFixed(2)), conf: CONFS[S.confIdx()].id, gear: +F.gear.pos.toFixed(2), crashed: F.crashed, ap: afs.ap, fma: m, phase: fms.phase,
