@@ -11,7 +11,7 @@ import * as THREE from 'three';
 import { AIRPORTS, findRunway, runwayEnd } from './geo.js';
 import { buildAirliner, LIVERIES } from './airliner.js';
 import { flattenStatic } from './world.js';
-import { taxiRoute, taxiPath, runwayExit, runwayCrossings, setTaxiCost } from './taxi.js?v=20261124d';
+import { taxiRoute, taxiPath, runwayExit, runwayCrossings, setTaxiCost } from './taxi.js?v=20261124e';
 
 const D2R = Math.PI / 180, G = 9.81, FT = 0.3048, KT = 0.514444;
 const rnd = Math.random;

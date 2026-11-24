@@ -75,7 +75,7 @@ export class ATC {
     this.frequency = 121.8;
     this.airport = AIRPORTS.find((a) => a.icao === 'KSFO') || AIRPORTS[0];
     this.runway = '28L';
-    this.callsign = 'Skyhawk 172SP';
+    this.callsign = setup?.callsign || 'Skyhawk 172SP';
     this.transmission = '';
     this.speaker = '';
     this.options = [];
@@ -84,6 +84,7 @@ export class ATC {
     this.messageId = 0;
     this.pdep = null; // player departure: {icao, rwy, state: 'hold' | 'luaw' | 'cleared' | 'airborne'}
     this.parr = null; // player arrival: {icao, rwy, cleared}
+    this.dest = null; this.destRwy = null; this.approachName = null; this.atGate = false;
     this.trafficEnabled = setup?.aiTraffic !== false;
     this.initFromSetup(setup);
   }
@@ -93,6 +94,8 @@ export class ATC {
   get towered() { return !!STATIONS[this.airport.icao]?.twr; }
 
   initFromSetup(setup) {
+    const fl = setup.flight;
+    if (fl && fl.dep) return this.initFlight(setup, fl);
     const SP = { SFO28: ['KSFO', '28L'], SFO28rwy: ['KSFO', '28L'], SFOramp: ['KSFO', '28L'], SFO1R: ['KSFO', '1R'], ILS28: ['KSFO', '28L'], OAK30: ['KOAK', '30'], OAK12: ['KOAK', '12'], OAK28R: ['KOAK', '28R'], SJC30: ['KSJC', '30L'], HWD28: ['KHWD', '28L'], SQL30: ['KSQL', '30'], PAO31: ['KPAO', '31'], LVK25: ['KLVK', '25R'], CCR32: ['KCCR', '32R'], RHV31: ['KRHV', '31R'], APC36: ['KAPC', '19R'], HAF30: ['KHAF', '30'], NUQ32: ['KNUQ', '32R'], DVO31: ['KDVO', '31'], O69: ['KO69', '29'], GG: ['KSFO', '28L'], cruise: ['KOAK', '30'] };
     const [airportCode, rwyCode] = SP[setup.spawn] || ['KSFO', '28L'];
     this.airport = AIRPORTS.find((a) => a.icao === airportCode) || this.airport;
@@ -125,6 +128,45 @@ export class ATC {
       this.stage = 'departurePosition';
       this.setATC(`${this.fac} Tower, ${this.callsign}, runway ${this.runway}, ready for departure.`, 'YOU',
         [{ label: 'Call ready for departure', action: 'readyDeparture' }]);
+    }
+  }
+
+  /** start-of-flight radio state for the step-3 start options (parked, ready to taxi, on the runway, climb, cruise, final) */
+  initFlight(setup, fl) {
+    const st = fl.stage || 'ramp', arr = st === 'final' || st === 'cruise';
+    this.dest = AIRPORTS.find((a) => a.icao === fl.dest) || null; this.destRwy = fl.arrRwy;
+    this.airport = AIRPORTS.find((a) => a.icao === (arr ? fl.dest : fl.dep)) || this.airport;
+    this.runway = arr ? fl.arrRwy : (setup.depRwy || fl.depRwy);
+    this.taxiVia = setup.taxiVia || 'Alpha';
+    this.approachName = arr && fl.arrILS ? `ILS runway ${this.runway}` : `visual approach runway ${this.runway}`;
+    const cs = this.callsign, fac = this.fac;
+    // airborne starts: don't replace the opening call with the pattern-entry reminder of an airport the route passes
+    this.patternReminder = st === 'climb' || st === 'cruise';
+    if (st === 'ramp') {
+      this.role = 'ground'; this.frequency = this.station('gnd'); this.stage = 'ramp';
+      const jet = fl.aircraft === 'A350'; this.atGate = jet;
+      this.transmission = jet ? `${fac} Ground, ${cs}, at the gate with information ${atisLetter(this.airport.icao)}, IFR to ${fl.dest}, ready to taxi after pushback.`
+        : `${fac} Ground, ${cs}, at the general aviation ramp with information ${atisLetter(this.airport.icao)}, requesting taxi for VFR departure.`;
+      this.speaker = 'YOU';
+      this.options = [{ label: 'Request taxi', action: 'requestTaxi' }, ...(jet ? [] : [{ label: 'Request flight following', action: 'requestFollowing' }])];
+    } else if (st === 'taxi') {
+      // the taxi clearance has already been issued; read it back and go
+      this.role = 'ground'; this.frequency = this.station('gnd'); this.stage = 'taxi';
+      this.setATC(`${cs}, ${fac} Ground, runway ${this.runway}, taxi via ${this.taxiVia}, hold short of runway ${this.runway}.`, 'GROUND',
+        [{ label: 'Read back taxi clearance', action: 'ackTaxi' }, { label: 'Request progressive taxi', action: 'progressiveTaxi' }]);
+    } else if (st === 'runway') {
+      this.role = 'tower'; this.frequency = this.station('twr'); this.stage = 'departurePosition';
+      this.setATC(`${fac} Tower, ${cs}, runway ${this.runway}, ready for departure.`, 'YOU', [{ label: 'Call ready for departure', action: 'readyDeparture' }]);
+    } else if (st === 'climb') {
+      this.role = 'departure'; this.frequency = this.station('dep'); this.stage = 'airborne';
+      this.setATC(`${cs}, climbing out of ${fac}, runway ${this.runway} departure.`, 'YOU', [{ label: 'Contact Departure', action: 'contactDeparture' }]);
+    } else if (st === 'cruise') {
+      this.role = 'departure'; this.frequency = this.station('dep'); this.stage = 'enroute';
+      this.setATC(`${cs}, en route to ${fl.dest}, request flight following.`, 'YOU', [{ label: 'Request flight following', action: 'requestFollowing' }, { label: `Contact approach (${fl.dest})`, action: 'contactApproach' }]);
+    } else {
+      this.role = 'approach'; this.frequency = this.station('app'); this.stage = 'approach';
+      this.setATC(`${cs}, on final for runway ${this.runway}, inbound for the ${this.approachName}.`, 'YOU',
+        [{ label: 'Contact approach', action: 'contactApproach' }, { label: 'Request missed approach?', action: 'requestMissedBrief' }]);
     }
   }
 
@@ -211,7 +253,7 @@ export class ATC {
 
     switch (action) {
       case 'requestTaxi':
-        this.readback(`${cs}, general aviation ramp, ready to taxi with ${atisLetter(this.airport.icao, sim)}.`);
+        this.readback(`${cs}, ${this.atGate ? 'at the gate' : 'general aviation ramp'}, ready to taxi with ${atisLetter(this.airport.icao, sim)}.`);
         this.role = 'ground'; this.frequency = gnd; this.setFrequency(sim, gnd);
         this.stage = 'taxi';
         this.taxiVia = sim.taxi?.route?.viaText || this.taxiVia;
@@ -287,22 +329,22 @@ export class ATC {
       case 'enroute':
         this.role = 'monitor';
         this.setATC(`${cs}, monitoring. Remain outside controlled airspace unless cleared.`, 'ATC',
-          [{ label: 'Copy', action: 'copyOnly' }]);
+          [{ label: 'Copy', action: 'copyOnly' }, ...(this.dest && this.approachName ? [{ label: `Contact approach (${this.dest.icao})`, action: 'contactApproach' }] : [])]);
         break;
       case 'contactApproach':
         this.role = 'approach'; this.frequency = app; this.setFrequency(sim, app);
-        this.setATC(`${cs}, ${S.appName || 'Approach'}, radar contact 8 miles, cleared ILS runway ${runway} approach, maintain 3,000 until established.`, 'APPROACH',
+        this.setATC(`${cs}, ${S.appName || 'Approach'}, radar contact, cleared ${this.approachName || 'ILS runway ' + runway + ' approach'}, maintain 3,000 until established.`, 'APPROACH',
           [{ label: 'Read back ILS clearance', action: 'ackApproach' }]);
         break;
       case 'ackApproach':
-        this.readback(`Cleared ILS runway ${runway}, maintain 3,000 until established, ${cs}.`);
+        this.readback(`Cleared ${this.approachName || 'ILS runway ' + runway}, maintain 3,000 until established, ${cs}.`);
         this.role = 'tower'; this.frequency = twr;
         this.setATC(`${cs}, contact ${fac} Tower ${f2(twr)}.`, 'APPROACH',
           [{ label: 'Switch to Tower', action: 'towerLanding' }]);
         break;
       case 'towerLanding': {
         this.setFrequency(sim, twr); this.frequency = twr; this.role = 'tower';
-        this.readback(`${fac} Tower, ${cs}, on the ILS runway ${runway}.`);
+        this.readback(`${fac} Tower, ${cs}, on final runway ${runway}.`);
         this.parr = { icao: this.airport.icao, rwy: runway, cleared: false };
         const q = T ? T.playerArrivalSequence(sim) : { n: 1 };
         const seq = q.n > 1 && q.lead ? `number ${q.n}, follow the ${q.lead} on ${q.leadAt}, ` : '';

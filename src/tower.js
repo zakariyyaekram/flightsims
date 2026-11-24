@@ -15,8 +15,8 @@
 //    short or go around;
 //  - one transmission at a time per frequency, readbacks follow the instruction (X-Plane 12 ATC style).
 import { AIRPORTS, runwayEnd } from './geo.js';
-import { onRunway, alongEnd, TYPE_NAME, flowInfo } from './traffic.js?v=20261124d';
-import { freqFor, facilityName, atisLetter, STATIONS } from './atc.js?v=20261124d';
+import { onRunway, alongEnd, TYPE_NAME, flowInfo } from './traffic.js?v=20261124e';
+import { freqFor, facilityName, atisLetter, STATIONS } from './atc.js?v=20261124e';
 
 const NM = 1852, FT = 0.3048, D2R = Math.PI / 180;
 const f2 = (f) => (Math.round(f * 1000) % 10 ? f.toFixed(3) : f.toFixed(2));
