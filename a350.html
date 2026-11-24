@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <link rel="icon" href="data:,">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>A350-1000 — Airbus Widebody Flight Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&family=Share+Tech+Mono&family=B612:wght@400;700&family=B612+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.123/Build/Cesium/Widgets/widgets.css" />
+<link rel="stylesheet" href="./src/style.css?v=20261124d" />
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.123/Build/Cesium/Cesium.js"></script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<style>
+#gsPanel { position: absolute; left: 14px; top: 48px; width: min(380px, calc(100vw - 28px)); pointer-events: auto; background: rgba(7,10,13,.94); border: 1px solid rgba(145,184,205,.32); border-radius: 8px; box-shadow: 0 18px 50px rgba(0,0,0,.45); font-family: var(--font); color: #e8ecef; z-index: 6; }
+#gsPanel header { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,.12); font-weight: 700; letter-spacing: .04em; }
+#gsPanel header button { background: none; border: 0; color: #e8ecef; font-size: 20px; cursor: pointer; }
+#gsList { padding: 8px 12px 12px; display: grid; gap: 6px; }
+.gsRow { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 13px; }
+.gsRow button { min-width: 112px; padding: 6px 8px; border-radius: 5px; border: 1px solid rgba(145,184,205,.4); background: rgba(34,73,92,.45); color: #e8ecef; font: 700 11px var(--font); cursor: pointer; }
+.gsRow button:hover { background: rgba(52,110,140,.6); }
+.chip.caut { background: #b8860b; color: #111; } .chip.warnRed { background: #c62828; }
+</style>
+</head>
+<body>
+<a href="./index.html" style="position:fixed;right:14px;bottom:14px;z-index:100;color:#e8ecef;text-decoration:none;background:rgba(8,12,16,.82);border:1px solid rgba(255,255,255,.16);border-radius:7px;padding:8px 12px;font:700 12px Barlow,system-ui,sans-serif">← Flight Hangar</a>
+<div id="cesiumContainer" aria-label="3D Earth terrain"></div>
+<canvas id="gl" aria-label="Flight simulator view" tabindex="0"></canvas>
+
+<div id="hud" class="hidden">
+  <div id="topbar">
+    <span id="viewName">FLIGHT DECK</span>
+    <span id="simRate" class="chip">1×</span>
+    <button id="perfChip" class="chip perfChip" type="button" title="Frame rate">-- FPS</button>
+    <button id="gsChip" class="chip" type="button" title="Ground services (J)">GROUND SVC · J</button>
+    <span id="apChip" class="chip hidden">AP</span>
+    <span id="brakeChip" class="chip warn hidden">PARK BRK</span>
+    <span id="pauseChip" class="chip warn hidden">PAUSED</span>
+    <span id="yokeChip" class="chip hidden">MOUSE SIDESTICK</span>
+    <span id="imcChip" class="chip hidden">IMC</span>
+    <span id="warnChip" class="chip warn hidden">MASTER WARN</span>
+    <button id="cklBtn" class="chip helpChip" type="button" title="Electronic checklist on the EWD (H)">C/L · H</button>
+    <button id="taxiBtn" class="chip helpChip hidden" type="button" title="Show / hide the taxi line to the runway (T)">TAXI LINE · T</button>
+    <button id="tmapBtn" class="chip helpChip" type="button" title="Airport diagram / taxi map (8)">TAXI MAP · 8</button>
+    <span id="taxiChip" class="chip hidden"></span>
+  </div>
+  <div id="strip">
+    <div><b id="dIas">0</b><i>KIAS</i></div>
+    <div><b id="dGs">0</b><i>GS kt</i></div>
+    <div><b id="dAlt">0</b><i>ALT ft</i></div>
+    <div><b id="dAgl">0</b><i>RA ft</i></div>
+    <div><b id="dVs">0</b><i>VS fpm</i></div>
+    <div><b id="dHdg">000</b><i>HDG</i></div>
+    <div><b id="dAoa">0.0</b><i>AOA °</i></div>
+    <div><b id="dG">1.00</b><i>LOAD G</i></div>
+    <div><b id="dN1">0 / 0</b><i>N1 %</i></div>
+    <div><b id="dThr">IDLE</b><i>THR LVR</i></div>
+    <div><b id="dFma">—</b><i>FMA</i></div>
+    <div><b id="dFlap">0</b><i>CONF</i></div>
+    <div><b id="dTrim">0</b><i>THS °</i></div>
+    <div><b id="dWind">—</b><i>WIND</i></div>
+  </div>
+  <canvas id="mini" width="440" height="440" aria-label="Mini map"></canvas>
+  <aside id="atcPanel" class="hidden" aria-label="Air traffic control">
+    <header>
+      <div><span>ATC · VHF 1</span>
+        <strong id="atcStatus">KSFO · GROUND · 121.80 MHz</strong></div>
+      <button id="atcClose" type="button" aria-label="Close ATC panel">×</button>
+    </header>
+    <div id="atcLog" aria-live="polite"></div>
+    <div id="atcTransmission">
+      <span id="atcSpeaker">YOU</span>
+      <p id="atcMessage"></p>
+    </div>
+    <div id="atcOptions"></div>
+  </aside>
+  <aside id="gsPanel" class="hidden" aria-label="Ground services">
+    <header><span>GROUND SERVICES</span><button id="gsClose" type="button" aria-label="Close ground services">×</button></header>
+    <div id="gsList"></div>
+  </aside>
+  <div id="toast"></div>
+  <div id="tip" class="hidden"></div>
+  <div id="cross" class="hidden"></div>
+  <div id="fps" class="hidden"></div>
+</div>
+
+<!-- map -->
+<div id="mapWrap" class="hidden">
+  <canvas id="map" aria-label="Navigation map"></canvas>
+  <div class="mapbar">
+    <strong>SECTIONAL — SAN FRANCISCO BAY AREA</strong>
+    <button id="mapCenter">Center on aircraft</button>
+    <button id="mapRot">Follow</button>
+    <span class="hint">Drag to pan · Wheel to zoom · M to close</span>
+  </div>
+  <div id="mapInfo"></div>
+</div>
+
+<!-- help -->
+<div id="help" class="hidden panelBox">
+  <div class="helpHead"><h2>A350-1000 controls &amp; procedures</h2><span class="pausedTag">SIM PAUSED</span>
+    <nav class="helpTabs"><button type="button" class="helpTab on" data-tab="ref">Keys &amp; procedures</button><button type="button" class="helpTab" data-tab="ctl">Key bindings &amp; mouse</button></nav></div>
+  <p id="keyNote" class="ctlNote">Simulation paused while this window is open.</p>
+  <div id="ctlSettings" class="hidden"></div>
+  <div id="helpRef">
+  <div class="cols">
+    <section><h3>Sidestick, levers, brakes</h3>
+      <dl>
+        <dt>↑ / ↓</dt><dd>Sidestick pitch (↓ = pull). Normal law: stick commands load factor, release = flight path hold</dd>
+        <dt>← / →</dt><dd>Sidestick roll (roll rate, bank hold)</dd>
+        <dt>Z / X</dt><dd>Rudder pedals · tiller below 30 kt · tug steering during pushback</dd>
+        <dt>Home / End</dt><dd>Rudder trim</dd>
+        <dt>W / S, PgUp / PgDn</dt><dd>Thrust levers (continuous). Shift = next detent: IDLE · CL · FLX/MCT · TO/GA</dd>
+        <dt>R</dt><dd>Reverse thrust (levers at idle, on the ground) / stow</dd>
+        <dt>F / V</dt><dd>Flap lever down / up: 0 · 1 (1+F on ground) · 2 · 3 · FULL</dd>
+        <dt>K / Shift+K · \</dt><dd>Speed brake extend 25 % / retract · arm ground spoilers</dd>
+        <dt>G</dt><dd>Landing gear lever</dd>
+        <dt>B (hold) · , .</dt><dd>Toe brakes both / left / right</dd>
+        <dt>P</dt><dd>Parking brake</dd>
+        <dt>Y</dt><dd>Mouse sidestick on/off (wheel = thrust levers, hold right button = rudder)</dd>
+        <dt>Gamepad</dt><dd>Stick, twist rudder, throttle axis, LB/RB flaps, Y gear, X AP disconnect, A brakes</dd>
+      </dl></section>
+    <section><h3>Flight deck</h3>
+      <dl>
+        <dt>Click anything</dt><dd>Every pushbutton, selector, knob and guard on the overhead, glareshield (FCU, EFIS CPs), pedestal (KCCU, RMP, ECP, engine masters, engine mode) and the 3D levers is live. Wheel turns knobs (Shift ×10). FCU knobs: left click push (managed), right click pull (selected)</dd>
+        <dt>MFD / KCCU</dt><dd>Click an MFD field, type on the keyboard (or the KCCU keys) and press Enter. F-PLN, INIT, PERF, FUEL&amp;LOAD, POSITION, SURV and ATCCOM pages</dd>
+        <dt>Shift+E</dt><dd>Auto flow: batteries, EXT power, ADIRS, APU, fuel pumps, beacon, ENG 2 then ENG 1, flaps 1+F</dd>
+        <dt>H</dt><dd>Electronic checklist (ECL) on the EWD</dd>
+        <dt>`</dt><dd>Master warning / caution reset</dd>
+        <dt>L / Shift+L</dt><dd>Landing lights / nose light (OFF · TAXI · T.O)</dd>
+        <dt>O / Shift+O · Shift+B</dt><dd>Strobe / nav lights · beacon</dd>
+        <dt>J</dt><dd>Ground services: GPU, refuelling, stairs and doors, pushback tug</dd>
+        <dt>0 / Shift+0</dt><dd>Look at the overhead / pedestal</dd>
+        <dt>D</dt><dd>Swap captain / first-officer seat</dd>
+      </dl></section>
+    <section><h3>Autoflight, views, sim</h3>
+      <dl>
+        <dt>A / Shift+A</dt><dd>AP 1 / AP 2</dd>
+        <dt>Q / Shift+Q</dt><dd>Sidestick AP disconnect / A/THR instinctive disconnect</dd>
+        <dt>Shift+← / →</dt><dd>FCU heading</dd>
+        <dt>Shift+↑ / ↓</dt><dd>FCU altitude</dd>
+        <dt>1–7, C</dt><dd>Flight deck · Free head · Orbit · Chase · Tower · Fly-by · Walkaround</dd>
+        <dt>Drag / Wheel / Space</dt><dd>Look / zoom / recenter</dd>
+        <dt>M · N · U · 8 · T</dt><dd>Map · Mini-map · Data strip · Taxi map · Taxi line</dd>
+        <dt>Shift+G</dt><dd>ATC panel</dd>
+        <dt>9 · Esc · ? · ;</dt><dd>Sim rate · Pause/menu · Help · Frame-rate stats</dd>
+      </dl></section>
+  </div>
+  <h3>Cold &amp; dark to takeoff (FCOM normal procedures, simplified)</h3>
+  <p class="vref">ELEC: BAT 1, BAT 2, EMER BAT 1/2 ON → EXT 1/2 ON (GPU from J) · ADIRS 1/2/3 NAV · APU MASTER, then APU START · APU BLEED ON · FUEL pumps ON · MFD: INIT (flight number), F-PLN, FUEL&amp;LOAD, PERF T.O (compute V1/VR/V2, FLEX) · Doors closed, stairs removed · BEACON ON · ENG MODE IGN/START · ENG MASTER 2 then 1 · ENG MODE NORM · APU BLEED OFF · FLAPS 1 (1+F) · GND SPLRS ARM · Auto brake RTO · T.O CONFIG test · Taxi with the tiller · Thrust levers FLX (or TO/GA) · Rotate at VR to ~12.5°, positive climb → gear up · thrust reduction altitude → CL detent.</p>
+  <h3>Reference numbers (A350-1000)</h3>
+  <p class="vref">MTOW 322 t · MLW 236 t · 2 × Trent XWB-97, 97,000 lbf · VMO 340 kt / MMO 0.89 · VLE 250 kt · VFE CONF 1 255 · 1+F 220 · 2 212 · 3 195 · FULL 186 kt · Vapp ≈ 140–150 kt at MLW · Pitch on rotation ≈ 12.5° · Approach CONF FULL, 3° glideslope, 30 ft "retard" callout.</p>
+  </div>
+  <button class="primary" id="helpClose">Close &amp; resume</button>
+</div>
+
+<!-- menu -->
+<div id="menu" class="panelBox">
+  <header>
+    <svg viewBox="0 0 64 64" width="44" height="44" aria-label="A350 logo"><circle cx="32" cy="32" r="30" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M6 34 L58 34 M26 22 L38 22 L36 34 M30 34 L30 48 M34 34 L34 48 M24 46 L40 46 M14 34 L14 40 M50 34 L50 40" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round"/></svg>
+    <div><h1 id="aircraftTitle">A350-1000</h1><p id="aircraftSubtitle">Airbus A350-1000 · Trent XWB-97 · fly-by-wire normal law · full flight deck · San Francisco Bay Area</p></div>
+  </header>
+  <div id="loadChoice">
+    <div id="editionStep">
+      <h2>Step 1 · Choose simulation detail</h2>
+      <p>Select an edition, then pick your aircraft.</p>
+      <div class="editionActions">
+        <button class="editionButton editionLight" id="loadLight" type="button" onclick="pickEdition('light')">
+          <strong>Light Edition</strong>
+          <span>Faster loading · fewer scenery details</span>
+        </button>
+        <button class="editionButton editionHeavy" id="loadHeavy" type="button" onclick="pickEdition('heavy')">
+          <strong>Heavy Edition</strong>
+          <span>Full scenery · realistic 3D environment</span>
+        </button>
+      </div>
+    </div>
+    <div id="aircraftStep" class="hidden">
+      <h2>Step 2 · Choose your aircraft</h2>
+      <p><b id="editionTag">Light Edition</b> selected · <button type="button" class="linkButton" onclick="pickBack()">change</button></p>
+      <div id="aircraftList" class="editionActions aircraftActions"></div>
+    </div>
+  </div>
+  <div id="loading" class="hidden"><div class="bar"><div id="loadBar"></div></div><span id="loadText">Loading…</span></div>
+  <form id="setup" class="hidden" onsubmit="return false">
+    <div class="grid">
+      <label>Start position
+        <select id="spawn">
+          <optgroup label="At the gate">
+            <option value="SFOgate" selected>KSFO International Terminal — cold &amp; dark, GPU connected</option>
+            <option value="SFOgateWarm">KSFO International Terminal — powered, APU off, engines off</option>
+            <option value="OAKgate">KOAK Oakland terminal — cold &amp; dark</option>
+          </optgroup>
+          <optgroup label="Lined up — engines running, CONF 1+F">
+            <option value="SFO28L">KSFO Rwy 28L</option>
+            <option value="SFO1R">KSFO Rwy 1R</option>
+            <option value="SJC30L">KSJC Rwy 30L</option>
+            <option value="OAK30">KOAK Rwy 30</option>
+          </optgroup>
+          <optgroup label="In the air">
+            <option value="ILS28L">ILS 28L KSFO — 11 NM final, 3,000 ft, CONF FULL, AP1+2 autoland</option>
+            <option value="ILS30L">ILS 30L KSJC — 11 NM final, 3,000 ft, CONF FULL, AP1+2 autoland</option>
+            <option value="cruise">10,000 ft over the East Bay, 280 kt, AP1</option>
+          </optgroup>
+        </select></label>
+      <label>Destination
+        <select id="dest"><option value="KSJC" selected>KSJC San José Rwy 30L</option><option value="KOAK">KOAK Oakland Rwy 30</option><option value="KSFO">KSFO San Francisco Rwy 28L</option></select></label>
+      <label>Cruise level <output id="crzOut">FL120</output>
+        <input id="crzfl" type="range" min="60" max="410" step="10" value="120" /></label>
+      <label>Time of day <output id="todOut">10:00</output>
+        <input id="tod" type="range" min="4" max="21.5" step="0.25" value="10" /></label>
+      <label>Wind from <output id="wdOut">280°</output>
+        <input id="wdir" type="range" min="0" max="350" step="10" value="280" /></label>
+      <label>Wind speed <output id="wsOut">10 kt</output>
+        <input id="wspd" type="range" min="0" max="40" step="1" value="10" /></label>
+      <label>Turbulence <output id="tbOut">Light</output>
+        <input id="turb" type="range" min="0" max="1" step="0.05" value="0.2" /></label>
+      <label>Clouds
+        <select id="clouds">
+          <option value="0">Clear</option><option value="0.25">Few</option><option value="0.45" selected>Scattered</option><option value="0.68">Broken</option><option value="0.95">Overcast (IMC in layer)</option>
+        </select></label>
+      <label>Cloud base <output id="cbOut">4,500 ft</output>
+        <input id="cbase" type="range" min="1000" max="12000" step="250" value="4500" /></label>
+      <label>Visibility <output id="visOut">40 km</output>
+        <input id="vis" type="range" min="1" max="80" step="1" value="40" /></label>
+      <label>QNH <output id="qnhOut">1016 hPa</output>
+        <input id="qnh" type="range" min="980" max="1045" step="1" value="1016" /></label>
+      <label>Temperature (ISA dev) <output id="isaOut">+5 °C</output>
+        <input id="isa" type="range" min="-25" max="30" step="1" value="5" /></label>
+      <label>Block fuel <output id="fuelOut">30 t</output>
+        <input id="fuel" type="range" min="10" max="124" step="1" value="30" /></label>
+      <label>Payload <output id="payloadOut">35 t</output>
+        <input id="payload" type="range" min="0" max="68" step="1" value="35" /></label>
+      <label>Graphics
+        <select id="quality"><option value="lite">Lite — low memory</option><option value="perf">Performance</option><option value="balanced" selected>Balanced</option><option value="high">High</option></select></label>
+      <label>Road traffic
+        <select id="roadTraffic"><option value="off">Off — fastest</option><option value="parked" selected>Parked cars only (no animation)</option><option value="moving">Moving traffic</option></select></label>
+      <label class="settingToggle"><input id="autoRes" type="checkbox" checked /> Auto resolution — lower render resolution when the frame rate drops</label>
+      <label class="settingToggle"><input id="atcEnabled" type="checkbox" checked /> Realistic ATC communications</label>
+      <label class="settingToggle"><input id="aiTraffic" type="checkbox" checked /> AI traffic</label>
+    </div>
+    <div class="actions">
+      <button class="primary" id="fly">Fly</button>
+      <button id="showHelp" type="button">Controls</button>
+      <span class="note">Fly-by-wire normal law with protections, FMS, autoflight with autoland, ECAM, electronic checklist, KCCU, OIS — every flight-deck control is clickable.</span>
+    </div>
+  </form>
+</div>
+
+<!-- crash -->
+<div id="crash" class="hidden panelBox">
+  <h2>Accident</h2>
+  <p id="crashWhy"></p>
+  <div class="actions"><button class="primary" id="retry">Restart same setup</button><button id="toMenu">Menu</button></div>
+</div>
+
+<script>
+window.startEdition = function (mode) {
+  const loadChoice = document.getElementById('loadChoice');
+  const loading = document.getElementById('loading');
+  const setup = document.getElementById('setup');
+  if (loadChoice) loadChoice.classList.add('hidden');
+  if (loading) loading.classList.remove('hidden');
+  if (setup) setup.classList.add('hidden');
+  const text = document.getElementById('loadText');
+  if (text) text.textContent = mode === 'light' ? 'Loading Light Edition…' : 'Loading Heavy Edition…';
+
+  if (typeof window.chooseLoadMode === 'function') {
+    window.chooseLoadMode(mode);
+    return;
+  }
+  import('./src/a350/main.js?v=20261124c').then(() => {
+    if (typeof window.chooseLoadMode === 'function') window.chooseLoadMode(mode);
+    else if (text) text.textContent = 'Failed to load the flight simulator.';
+  }).catch((error) => {
+    console.error(error);
+    if (text) text.textContent = 'Failed to load: ' + (error.message || error);
+  });
+};
+</script>
+<script src="./src/picker.js?v=20261124a"></script>
+<script type="module" src="./src/a350/main.js?v=20261124c"></script>
+</body>
+</html>

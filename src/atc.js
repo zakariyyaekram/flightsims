@@ -144,7 +144,7 @@ export class ATC {
   /** a transmission on `freq` (AI traffic or a controller talking to it): heard if COM 1 or COM 2 is tuned to it */
   hear(sim, freq, speaker, text) {
     const av = sim.av; if (!av) return false;
-    const on = (c, n) => Math.abs(c.active - freq) < 0.004 && (!av.comPowered || !sim.fdm.eff || av.comPowered(sim.fdm, n));
+    const on = (c, n) => !!c && Math.abs(c.active - freq) < 0.004 && (!av.comPowered || !sim.fdm.eff || av.comPowered(sim.fdm, n));
     if (!on(av.com1, 1) && !on(av.com2, 2)) return false;
     this.logLine(speaker, text, true); this.dirty = true; return true;
   }

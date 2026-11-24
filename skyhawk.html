@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.123/Build/Cesium/Widgets/widgets.css" />
-<link rel="stylesheet" href="./src/style.css?v=20261124c" />
+<link rel="stylesheet" href="./src/style.css?v=20261124d" />
 <script src="https://cesium.com/downloads/cesiumjs/releases/1.123/Build/Cesium/Cesium.js"></script>
 <script type="importmap">
 { "imports": {
@@ -188,25 +188,30 @@
     <div><h1 id="aircraftTitle">SKYHAWK</h1><p id="aircraftSubtitle">Cessna 172S · Blade-element flight model · San Francisco Bay Area</p></div>
   </header>
   <div id="loadChoice">
-    <h2>Choose aircraft and simulation detail</h2>
-    <label class="aircraftChoice">Aircraft
-      <select id="aircraftType">
-        <option value="C172">Cessna 172S Skyhawk — 180 hp trainer</option>
-        <option value="C152">Cessna 152 Aerobat — 110 hp trainer</option>
-      </select>
-    </label>
-    <p>Select an edition to load.</p>
-    <div class="editionActions">
-      <button class="editionButton editionLight" id="loadLight" type="button" onclick="startEdition('light')">
-        <strong>Light Edition</strong>
-        <span>Faster loading · fewer scenery details</span>
-      </button>
-      <button class="editionButton editionHeavy" id="loadHeavy" type="button" onclick="startEdition('heavy')">
-        <strong>Heavy Edition</strong>
-        <span>Full scenery · realistic 3D environment</span>
-      </button>
+    <div id="editionStep">
+      <h2>Step 1 · Choose simulation detail</h2>
+      <p>Select an edition, then pick your aircraft.</p>
+      <div class="editionActions">
+        <button class="editionButton editionLight" id="loadLight" type="button" onclick="pickEdition('light')">
+          <strong>Light Edition</strong>
+          <span>Faster loading · fewer scenery details</span>
+        </button>
+        <button class="editionButton editionHeavy" id="loadHeavy" type="button" onclick="pickEdition('heavy')">
+          <strong>Heavy Edition</strong>
+          <span>Full scenery · realistic 3D environment</span>
+        </button>
+      </div>
+    </div>
+    <div id="aircraftStep" class="hidden">
+      <h2>Step 2 · Choose your aircraft</h2>
+      <p><b id="editionTag">Light Edition</b> selected · <button type="button" class="linkButton" onclick="pickBack()">change</button></p>
+      <div id="aircraftList" class="editionActions aircraftActions"></div>
     </div>
   </div>
+  <select id="aircraftType" class="hidden" aria-hidden="true" tabindex="-1">
+    <option value="C172">Cessna 172S Skyhawk — 180 hp trainer</option>
+    <option value="C152">Cessna 152 Aerobat — 110 hp trainer</option>
+  </select>
   <div id="loading" class="hidden"><div class="bar"><div id="loadBar"></div></div><span id="loadText">Loading…</span></div>
   <form id="setup" class="hidden" onsubmit="return false">
     <div class="grid">
@@ -313,6 +318,7 @@ window.startEdition = function (mode) {
   });
 };
 </script>
+<script src="./src/picker.js?v=20261124a"></script>
 <script type="module" src="./src/main.js?v=20261124c"></script>
 <script data-pplx-inline-edit>
 (function () {
