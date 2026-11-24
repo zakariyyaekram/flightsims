@@ -1,5 +1,20 @@
 # flightsims
-A collection of flight simulators. Open [index.html](./index.html) to choose which simulator to use.
+A collection of flight simulators. Open [index.html](./index.html) to choose which simulator to use. Every simulator page starts the same way: first pick **Light** or **Heavy** edition, then pick the aircraft (Cessna 172S, Cessna 152 or Airbus A350-1000). Picking an aircraft that lives on another page opens that page and starts loading with the edition you chose.
+
+## Airbus A350-1000 ([a350.html](./a350.html))
+A Trent XWB-97 powered A350-1000 (73.78 m long, 64.75 m span, MTOW 322 t, MLW 236 t, VMO 340 kt / MMO 0.89) with a clickable flight deck based on the real one:
+
+- **Displays:** six 15-inch screens per Airbus layout: PFD, ND, EWD, SD (ECAM system pages and the electronic checklist), and the two MFDs (FMS pages: INIT, F-PLN, PERF, FUEL&LOAD, DATA) driven by the KCCU keyboard and trackball keys.
+- **Glareshield:** EFIS control panels (baro hPa/inHg, FD, LS, VV, ND mode and range, CSTR/WPT/VORD/NDB/ARPT, terrain/WX), FCU (SPD/MACH, HDG/TRK, ALT, V/S/FPA, AP1, AP2, A/THR, LOC, APPR, EXPED), master warning and master caution.
+- **Overhead:** ADIRS, ELEC (BAT 1/2, BAT EMER 1/2, EXT 1/2, APU GEN, engine gens, bus ties), APU MASTER/START, AIR/bleed and packs, FUEL pumps, hydraulics, ENG MODE/IGN, anti-ice, lights (beacon, nav, strobe, landing, nose, taxi), signs, wipers, calls and cargo/doors.
+- **Pedestal:** thrust levers with CL/FLX-MCT/TOGA detents and reverse, ENG MASTER 1/2 and ENG MODE selector, speed brake, flap lever (0/1/1+F/2/3/FULL), parking brake, RMPs, ECP, the transponder panel and KCCUs.
+- **Front panel:** landing gear lever, autobrake (LO/2/3/HI/BTV/RTO) and brake/accumulator indicators.
+- **Systems:** electrical buses, APU start, engine start sequence, normal law fly-by-wire with flight envelope protection, A/THR with FLX takeoff, autopilot modes (SPD, HDG/NAV, ALT, V/S, OP CLB/DES, LOC/G/S, LAND), ECAM alerts and checklist, and ground services (GPU, refuel, stairs, cargo doors, tug and pushback).
+- **Spawns:** SFO/OAK gates (cold & dark or ready-to-taxi), runways SFO 28L/1R, SJC 30L, OAK 30, ILS approaches (28L / 30L) and cruise.
+
+Main keys: `Shift+E` automatic engine start, `W/S` thrust lever detents, `F/V` flaps, `G` gear, `P` parking brake, `A`/`Shift+A` AP1/AP2, `Q` AP disconnect, `H` checklist, `J` ground services, `M` map, `C`/`1-7` views, `0`/`Shift+0` overhead and pedestal look. Click any switch, knob or key in the cockpit to use it.
+
+Research sources: [Airbus A350-1000](https://www.aircraft.airbus.com/en/aircraft/a350/a350-1000), [Airbus A350 Facts & Figures](https://www.airbus.com/sites/default/files/2025-04/Airbus-A350-Family-Facts-and-Figures-April-2025.pdf), [Wikipedia](https://en.wikipedia.org/wiki/Airbus_A350), [DMI Aviation](https://dmiaviation.com/airbus-a350-xwb-specs-history-and-tires/), [A350 FCOM](https://pdfcoffee.com/flight-crew-operating-manual-reference-vir-a350-fleet-fcom-issue-date-15-mar-20-pdf-free.html), [BEA F-HTYO report](https://bea.aero/fileadmin/user_upload/F-HTYO_EN.pdf), [Avioscope ELEC panel](https://www.avioscope.com/articles/airbus-a350-electrical-power-control), [Aerofly A350 flight deck](https://www.aerofly.com/aircraft-tutorials/a350_flightdeck/), [FlightGlobal](https://www.flightglobal.com/a350-flightdeck-an-evolution-of-a380-concept/88047.article).
 
 ## Ground services (Skyhawk)
 Press **J** (or click **GROUND SVC** in the top bar) to open the ground services panel. Services only work where they would in real life: stopped on an airport ramp or apron (not a runway, taxiway or grass), with the parking brake set and the engine shut down for fuel and boarding.
