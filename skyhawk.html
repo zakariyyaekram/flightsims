@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.123/Build/Cesium/Widgets/widgets.css" />
-<link rel="stylesheet" href="./src/style.css?v=20261124d" />
+<link rel="stylesheet" href="./src/style.css?v=20261124e" />
 <script src="https://cesium.com/downloads/cesiumjs/releases/1.123/Build/Cesium/Cesium.js"></script>
 <script type="importmap">
 { "imports": {
@@ -207,6 +207,10 @@
       <p><b id="editionTag">Light Edition</b> selected · <button type="button" class="linkButton" onclick="pickBack()">change</button></p>
       <div id="aircraftList" class="editionActions aircraftActions"></div>
     </div>
+    <div id="flightStep" class="hidden">
+      <h2>Step 3 · Flight plan &amp; start state</h2>
+      <p><b id="fpTag">Light Edition</b> · <button type="button" class="linkButton" onclick="pickBack(2)">change aircraft</button></p>
+    </div>
   </div>
   <select id="aircraftType" class="hidden" aria-hidden="true" tabindex="-1">
     <option value="C172">Cessna 172S Skyhawk — 180 hp trainer</option>
@@ -215,31 +219,6 @@
   <div id="loading" class="hidden"><div class="bar"><div id="loadBar"></div></div><span id="loadText">Loading…</span></div>
   <form id="setup" class="hidden" onsubmit="return false">
     <div class="grid">
-      <label>Start position
-        <select id="spawn">
-          <optgroup label="Parked on the GA ramp — cold &amp; dark (start, taxi, take off)">
-            <option value="SFO28" selected>KSFO San Francisco — GA ramp, cold &amp; dark, depart Rwy 28L</option>
-            <option value="SFO1R">KSFO San Francisco — GA ramp, cold &amp; dark, depart Rwy 1R</option>
-            <option value="OAK28R">KOAK Oakland (North Field) — GA ramp, cold &amp; dark, depart Rwy 28R</option>
-            <option value="SJC30">KSJC San Jose — GA ramp, cold &amp; dark, depart Rwy 30L</option>
-            <option value="PAO31">KPAO Palo Alto — GA ramp, cold &amp; dark, depart Rwy 31</option>
-            <option value="HWD28">KHWD Hayward — GA ramp, cold &amp; dark, depart Rwy 28L</option>
-            <option value="SQL30">KSQL San Carlos — GA ramp, cold &amp; dark, depart Rwy 30</option>
-            <option value="RHV31">KRHV Reid-Hillview — GA ramp, cold &amp; dark, depart Rwy 31R</option>
-            <option value="LVK25">KLVK Livermore — GA ramp, cold &amp; dark, depart Rwy 25R</option>
-            <option value="CCR32">KCCR Concord — GA ramp, cold &amp; dark, depart Rwy 32R</option>
-            <option value="APC36">KAPC Napa — GA ramp, cold &amp; dark, depart Rwy 19R</option>
-            <option value="HAF30">KHAF Half Moon Bay — GA ramp, cold &amp; dark, depart Rwy 30</option>
-            <option value="DVO31">KDVO Gnoss Field — GA ramp, cold &amp; dark, depart Rwy 31</option>
-            <option value="O69">O69 Petaluma — GA ramp, cold &amp; dark, depart Rwy 29</option>
-          </optgroup>
-          <optgroup label="Quick starts — engine running">
-            <option value="SFO28rwy">KSFO San Francisco — lined up on Rwy 28L, ready for takeoff</option>
-          <option value="ILS28">ILS 28L KSFO — 8 NM final, 3,000 ft</option>
-          <option value="GG">Downtown San Francisco — 1,500 ft toward the Golden Gate</option>
-          <option value="cruise">Cruise 4,500 ft — over the Bay</option>
-          </optgroup>
-        </select></label>
       <label>Time of day <output id="todOut">10:00</output>
         <input id="tod" type="range" min="4" max="21.5" step="0.25" value="10" /></label>
       <label>Wind from <output id="wdOut">250°</output>
@@ -309,7 +288,7 @@ window.startEdition = function (mode) {
     window.chooseLoadMode(mode);
     return;
   }
-  import('./src/main.js?v=20261124c').then(() => {
+  import('./src/main.js?v=20261124e').then(() => {
     if (typeof window.chooseLoadMode === 'function') window.chooseLoadMode(mode);
     else if (text) text.textContent = 'Failed to load the flight simulator.';
   }).catch((error) => {
@@ -318,8 +297,9 @@ window.startEdition = function (mode) {
   });
 };
 </script>
-<script src="./src/picker.js?v=20261124a"></script>
-<script type="module" src="./src/main.js?v=20261124c"></script>
+<script src="./src/flightsetup.js?v=20261124e"></script>
+<script src="./src/picker.js?v=20261124e"></script>
+<script type="module" src="./src/main.js?v=20261124e"></script>
 <script data-pplx-inline-edit>
 (function () {
   if (window === window.top) return;

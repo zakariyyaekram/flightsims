@@ -9,6 +9,17 @@ import fs from 'fs';
 const base = process.argv[2] || 'http://localhost:8765/';
 const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1200, height: 750 } });
+// step 3 of the start screen: flight plan and start state
+async function flightSetup(page, o) {
+  await page.waitForSelector('#fpGo', { state: 'visible', timeout: 30000 });
+  await page.evaluate((o) => {
+    const set = (id, v) => { const e = document.getElementById(id); if (v == null || !e) return; e.value = v; e.dispatchEvent(new Event('change', { bubbles: true })); e.dispatchEvent(new Event('input', { bubbles: true })); };
+    set('fpDep', o.dep); set('fpDepRwy', o.depRwy); set('fpDest', o.dest); set('fpArrRwy', o.arrRwy);
+    document.querySelector(`.fpState[data-state="${o.state}"]`)?.click();
+    set('fpAir', o.air);
+  }, o);
+  await page.click('#fpGo');
+}
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 let ionRejected = false;
@@ -17,9 +28,9 @@ page.on('console', (m) => { if (m.type() === 'error' && !/favicon|404|401|net::E
 
 const t0 = Date.now();
 await page.goto(base + 'a350.html?manual'); // manual stepping: the test drives frames itself
-await page.evaluate(() => { document.getElementById('spawn').value = 'SFO28L'; }); // warm runway start: engines and displays on
 await page.click('#loadHeavy');
 await page.click('#aircraftList [data-aircraft="A350"]');
+await flightSetup(page, { dep: 'KSFO', depRwy: '28L', dest: 'KSJC', state: 'runway' }); // lined up: engines and displays on
 let state = null;
 for (let i = 0; i < 300; i++) {
   await page.waitForTimeout(1000);

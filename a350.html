@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&family=Share+Tech+Mono&family=B612:wght@400;700&family=B612+Mono:wght@400;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.123/Build/Cesium/Widgets/widgets.css" />
-<link rel="stylesheet" href="./src/style.css?v=20261124d" />
+<link rel="stylesheet" href="./src/style.css?v=20261124e" />
 <script src="https://cesium.com/downloads/cesiumjs/releases/1.123/Build/Cesium/Cesium.js"></script>
 <script type="importmap">
 { "imports": {
@@ -186,33 +186,14 @@
       <p><b id="editionTag">Light Edition</b> selected · <button type="button" class="linkButton" onclick="pickBack()">change</button></p>
       <div id="aircraftList" class="editionActions aircraftActions"></div>
     </div>
+    <div id="flightStep" class="hidden">
+      <h2>Step 3 · Flight plan &amp; start state</h2>
+      <p><b id="fpTag">Light Edition</b> · <button type="button" class="linkButton" onclick="pickBack(2)">change aircraft</button></p>
+    </div>
   </div>
   <div id="loading" class="hidden"><div class="bar"><div id="loadBar"></div></div><span id="loadText">Loading…</span></div>
   <form id="setup" class="hidden" onsubmit="return false">
     <div class="grid">
-      <label>Start position
-        <select id="spawn">
-          <optgroup label="At the gate">
-            <option value="SFOgate" selected>KSFO International Terminal — cold &amp; dark, GPU connected</option>
-            <option value="SFOgateWarm">KSFO International Terminal — powered, APU off, engines off</option>
-            <option value="OAKgate">KOAK Oakland terminal — cold &amp; dark</option>
-          </optgroup>
-          <optgroup label="Lined up — engines running, CONF 1+F">
-            <option value="SFO28L">KSFO Rwy 28L</option>
-            <option value="SFO1R">KSFO Rwy 1R</option>
-            <option value="SJC30L">KSJC Rwy 30L</option>
-            <option value="OAK30">KOAK Rwy 30</option>
-          </optgroup>
-          <optgroup label="In the air">
-            <option value="ILS28L">ILS 28L KSFO — 11 NM final, 3,000 ft, CONF FULL, AP1+2 autoland</option>
-            <option value="ILS30L">ILS 30L KSJC — 11 NM final, 3,000 ft, CONF FULL, AP1+2 autoland</option>
-            <option value="cruise">10,000 ft over the East Bay, 280 kt, AP1</option>
-          </optgroup>
-        </select></label>
-      <label>Destination
-        <select id="dest"><option value="KSJC" selected>KSJC San José Rwy 30L</option><option value="KOAK">KOAK Oakland Rwy 30</option><option value="KSFO">KSFO San Francisco Rwy 28L</option></select></label>
-      <label>Cruise level <output id="crzOut">FL120</output>
-        <input id="crzfl" type="range" min="60" max="410" step="10" value="120" /></label>
       <label>Time of day <output id="todOut">10:00</output>
         <input id="tod" type="range" min="4" max="21.5" step="0.25" value="10" /></label>
       <label>Wind from <output id="wdOut">280°</output>
@@ -275,7 +256,7 @@ window.startEdition = function (mode) {
     window.chooseLoadMode(mode);
     return;
   }
-  import('./src/a350/main.js?v=20261124u').then(() => {
+  import('./src/a350/main.js?v=20261124v').then(() => {
     if (typeof window.chooseLoadMode === 'function') window.chooseLoadMode(mode);
     else if (text) text.textContent = 'Failed to load the flight simulator.';
   }).catch((error) => {
@@ -284,7 +265,8 @@ window.startEdition = function (mode) {
   });
 };
 </script>
-<script src="./src/picker.js?v=20261124a"></script>
-<script type="module" src="./src/a350/main.js?v=20261124u"></script>
+<script src="./src/flightsetup.js?v=20261124e"></script>
+<script src="./src/picker.js?v=20261124e"></script>
+<script type="module" src="./src/a350/main.js?v=20261124v"></script>
 </body>
 </html>

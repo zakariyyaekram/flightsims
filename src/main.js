@@ -14,16 +14,17 @@ import { Avionics, ILS } from './avionics.js?v=20261123g';
 import { Environment } from './env.js';
 import { buildAirports, RockField, Forest, GrassField } from './world.js';
 import { Scenery } from './scenery.js?v=20261123g';
-import { Traffic } from './traffic.js?v=20261124c';
-import { Tower } from './tower.js?v=20261124c';
+import { Traffic } from './traffic.js?v=20261124e';
+import { Tower } from './tower.js?v=20261124e';
 import { buildLife } from './life.js?v=20261123g';
 import { MovingMap } from './map.js?v=20261123g';
-import { departureRoute, routeProgress } from './taxi.js?v=20261124c';
-import { toggleTaxiMap, updateTaxiMap, taxiMapOpen, taxiChart } from './taximap.js?v=20261124c';
+import { departureRoute, routeProgress } from './taxi.js?v=20261124e';
+import { toggleTaxiMap, updateTaxiMap, taxiMapOpen, taxiChart } from './taximap.js?v=20261124e';
 import { Checklist } from './checklist.js?v=20261123g';
 import { Sound } from './audio.js';
 import { setAniso } from './textures.js';
-import { ATC } from './atc.js?v=20261124c';
+import { ATC } from './atc.js?v=20261124e';
+import { resolveFlight, enRoutePoint, hasILS } from './flightplan.js?v=20261124e';
 import { PlayerGroundServices } from './groundservices.js?v=20261124b';
 import { tickGSE } from './gse.js?v=20261124b';
 import { remap, buildControlsUI, changedCount, mouseSettings, mouseAxis } from './controls.js?v=20261123g';
@@ -342,7 +343,7 @@ aircraftTypeSelect.addEventListener('change', () => {
 // ---------------- setup / spawn ----------------
 function readSetup() {
   return {
-    aircraftType: $('aircraftType').value, spawn: $('spawn').value, tod: +$('tod').value, windDir: +$('wdir').value, windKt: +$('wspd').value, turb: +$('turb').value,
+    aircraftType: $('aircraftType').value, fp: window.FlightSetup?.get() || null, tod: +$('tod').value, windDir: +$('wdir').value, windKt: +$('wspd').value, turb: +$('turb').value,
     cover: +$('clouds').value, baseFt: +$('cbase').value, visKm: +$('vis').value, qnhInHg: +$('qnh').value, isa: +$('isa').value, fuel: +$('fuel').value, quality: $('quality').value, autoRes: $('autoRes').checked, roadTraffic: $('roadTraffic').value,
     atcEnabled: $('atcEnabled').checked, aiTraffic: $('aiTraffic').checked,
     failureScenario: $('failureScenario').value, triggerFailureAtStart: $('triggerFailureAtStart').checked,
@@ -396,33 +397,43 @@ function applySetup(s, warmOnly = false) {
   if (grass) { grass.quality = q[2]; grass.lastKey = null; }
   if (life) life.quality = q[2];
   sim.quality = s.quality;
-  // spawn
+  // spawn: from the step-3 flight plan & start state
   let pos, hdg, onGround = true, speed = 0, cold = false, pitch = 0, alt;
   // line up just past the (displaced) threshold of a real runway end
   const rwyStart = (icao, id) => { const f = findRunway(icao, id); const e = runwayEnd(f.r, f.e); const k = (f.r.disp[f.e] || 0) - 35; return { p: { x: e.x - e.dir[0] * k, z: e.z - e.dir[1] * k }, hdg: e.hdg }; };
   let flapsInit = 0;
-  const SP = { SFO28: ['KSFO', '28L'], SFO28L: ['KSFO', '28L'], SFO1R: ['KSFO', '1R'], OAK30: ['KOAK', '30'], OAK12: ['KOAK', '12'], OAK28R: ['KOAK', '28R'], SJC30: ['KSJC', '30L'], HWD28: ['KHWD', '28L'], SQL30: ['KSQL', '30'], PAO31: ['KPAO', '31'], LVK25: ['KLVK', '25R'], CCR32: ['KCCR', '32R'], RHV31: ['KRHV', '31R'], APC36: ['KAPC', '19R'], HAF30: ['KHAF', '30'], NUQ32: ['KNUQ', '32R'], DVO31: ['KDVO', '31'], O69: ['KO69', '29'] };
-  if (s.spawn === 'SFOramp') s.spawn = 'SFO28'; // older saved menu value
-  sim.taxi = null;
-  if (SP[s.spawn]) {
-    // parked on the general-aviation ramp, cold & dark; taxi route to the departure runway over the real taxiways
-    const [icao, rw] = SP[s.spawn], a = airport(icao);
-    pos = { x: a.ramp.x, z: a.ramp.z }; hdg = a.ramp.hdg; cold = true;
-    const route = departureRoute(icao, rw, pos.x, pos.z);
+  const R = resolveFlight(s.fp, { windDir: s.windDir, windKt: s.windKt }, 550);
+  const stage = R.stage, st = R.state;
+  s.flight = R; s.stage = stage; sim.flight = R;
+  sim.taxi = null; s.ramp = false; s.depRwy = R.depRwy; s.taxiVia = null;
+  if (stage === 'ramp' || stage === 'taxi') {
+    // parked on the general-aviation ramp; taxi route to the departure runway over the real taxiways
+    const a = R.depA;
+    pos = { x: a.ramp.x, z: a.ramp.z }; hdg = a.ramp.hdg; cold = st === 'cold';
+    const route = departureRoute(R.dep, R.depRwy, pos.x, pos.z);
     if (route) {
-      sim.taxi = { route, show: true, icao };
+      sim.taxi = { route, show: true, icao: R.dep };
       // nose toward the first leg of the route so the taxi starts straight ahead
       const t = route.pts.find((p) => Math.hypot(p.x - pos.x, p.z - pos.z) > 30) || route.pts[route.pts.length - 1];
       hdg = (Math.atan2(t.x - pos.x, -(t.z - pos.z)) / D2R + 360) % 360;
     }
-    s.depRwy = route ? route.rwy : rw; s.taxiVia = route ? route.viaText : null; s.ramp = true;
-  }
-  else switch (s.spawn) {
-    case 'SFO28rwy': { const r = rwyStart('KSFO', '28L'); pos = r.p; hdg = r.hdg; break; }
-    case 'ILS28': { const i = ILS.find((x) => x.ident === 'ISFO') || ILS[0]; const d = 8 * 1852; const c = i.course * D2R; pos = { x: i.thr.x - Math.sin(c) * d, z: i.thr.z + Math.cos(c) * d }; hdg = i.course; onGround = false; speed = 95; alt = Math.max(3000 * FT + (s.qnhInHg - 29.92) * 1000 * FT, i.elev + Math.tan(3 * D2R) * d + 30); pitch = 2; break; }
-    case 'cruise': { pos = ll2w(37.70, -122.30); hdg = 320; onGround = false; speed = 108; alt = 4500 * FT; pitch = 1.5; break; }
-    case 'GG': { pos = ll2w(37.79, -122.40); hdg = 300; onGround = false; speed = 100; alt = 1500 * FT; pitch = 1; break; }
-    default: { const r = rwyStart('KSFO', '28L'); pos = r.p; hdg = r.hdg; }
+    s.depRwy = route ? route.rwy : R.depRwy; s.taxiVia = route ? route.viaText : null; s.ramp = true;
+  } else if (stage === 'runway') {
+    const r = rwyStart(R.dep, R.depRwy); pos = r.p; hdg = r.hdg;
+  } else if (stage === 'climb') {
+    // a mile and a half past the departure end, climbing on runway heading
+    const e = R.depEnd, L = R.depRunway.len, d = L + 1.5 * 1852;
+    pos = { x: e.x + e.dir[0] * d, z: e.z + e.dir[1] * d }; hdg = e.hdg; onGround = false; speed = 78; pitch = 6;
+    alt = e.elev + 1000 * FT; flapsInit = 0;
+  } else if (stage === 'cruise') {
+    const p = enRoutePoint(R); pos = { x: p.x, z: p.z }; hdg = p.hdg; onGround = false; speed = 105; pitch = 1.5; R.leg = p.leg;
+    alt = Math.max(R.crzFt * FT, heightAt(p.x, p.z) + 1000 * FT);
+  } else { // final approach at the destination: ILS 8 NM final when the runway has one, else a 4 NM straight-in
+    const e = R.arrEnd, ils = ILS.find((x) => x.airport.icao === R.dest && x.rwy === R.arrRwy);
+    const c = (ils ? ils.course : e.hdg) * D2R, th = ils ? ils.thr : e;
+    let d = (ils ? 8 : 4) * 1852; while (d > 3 * 1852 && !inWorld(th.x - Math.sin(c) * d, th.z + Math.cos(c) * d, 3000)) d -= 1852;
+    pos = { x: th.x - Math.sin(c) * d, z: th.z + Math.cos(c) * d }; hdg = ils ? ils.course : e.hdg; onGround = false; speed = ils ? 95 : 85; pitch = 2;
+    alt = (ils ? ils.elev : e.elev) + Math.tan(3 * D2R) * d + 15; flapsInit = ils ? 0 : 10;
   }
   sim.atc.reset(s);
   if (sim.tower) sim.tower.q.clear();
@@ -443,8 +454,16 @@ function applySetup(s, warmOnly = false) {
   F.sys.fuelL = F.sys.fuelR = requestedFuel;
   if (!cold && sim.night > 0.25) { F.sys.panelLights = true; F.sys.nav = true; }
   F.kollsman = cold ? 29.92 : Math.round(s.qnhInHg * 100) / 100;
-  if (!onGround) { F.ctrl.throttle = s.spawn === 'ILS28' ? 0.5 : 0.72; F.ctrl.trim = s.spawn === 'ILS28' ? 0.2 : 0.05; F.ctrl.parkBrake = false; F.eng.rpm = 2300; F.eng.propOmega = 2300 * Math.PI / 30; }
-  if (onGround && !cold) { F.ctrl.throttle = 0.08; F.ctrl.parkBrake = false; F.ctrl.toeBrake = 0; }
+  if (!onGround) { F.ctrl.throttle = stage === 'final' ? 0.5 : stage === 'climb' ? 1 : 0.72; F.ctrl.trim = stage === 'final' ? 0.2 : stage === 'climb' ? 0.15 : 0.05; F.ctrl.parkBrake = false; F.eng.rpm = 2300; F.eng.propOmega = 2300 * Math.PI / 30; }
+  if (onGround && !cold) {
+    F.ctrl.throttle = 0.08; F.ctrl.toeBrake = 0;
+    // parked with the engine running: brake set; ready to taxi: lights, transponder and flaps set, brake still set; runway: brake off
+    F.ctrl.parkBrake = stage !== 'runway';
+    if (stage === 'ramp') { F.sys.taxi = false; F.sys.nav = sim.night > 0.25; F.sys.strobe = false; }
+    if (stage === 'taxi') { F.sys.taxi = true; F.sys.beacon = true; F.sys.nav = true; F.ctrl.trim = 0.05; }
+    if (stage === 'runway') { F.sys.landing = true; F.sys.strobe = true; F.sys.taxi = false; F.ctrl.trim = 0.05; }
+  }
+  if (!onGround) { F.sys.landing = stage !== 'cruise'; F.sys.strobe = true; F.sys.taxi = false; }
   if (!onGround) F.trimAir(0); // solve AoA + elevator trim for 1 g at the spawn speed
   F.ind.ias = speed; F.ind.alt = 0;
   // avionics
@@ -452,11 +471,19 @@ function applySetup(s, warmOnly = false) {
   av.ap.on = false; av.ap.discAlert = 0;
   av.hdgBug = Math.round(hdg);
   { // tune NAV1 to the ILS of the departure / approach runway when it has one, else the nearest VOR
-    const code = SP[s.spawn] ? [SP[s.spawn][0], s.depRwy || SP[s.spawn][1]] : (s.spawn === 'ILS28' || s.spawn === 'SFO28rwy' ? ['KSFO', '28L'] : null);
-    const il = code ? ILS.find((i) => i.airport.icao === code[0] && i.rwy === code[1]) || ILS.find((i) => i.airport.icao === code[0]) : null;
+    const code = stage === 'final' || stage === 'cruise' ? [R.dest, R.arrRwy] : [R.dep, s.depRwy || R.depRwy];
+    const il = ILS.find((i) => i.airport.icao === code[0] && i.rwy === code[1]) || (stage === 'final' ? null : ILS.find((i) => i.airport.icao === code[0]));
     let vor = null, bd = 1e12; for (const n of NAVAIDS) if (n.type === 'VOR') { const d = Math.hypot(n.x - pos.x, n.z - pos.z); if (d < bd) { bd = d; vor = n; } }
     if (il) { av.nav1.active = il.freq; av.nav1.obs = Math.round(il.course); if (vor) av.nav1.standby = vor.freq; }
     else if (vor) { av.nav1.active = vor.freq; av.nav1.obs = Math.round(hdg); }
+  }
+  { // GPS flight plan: route waypoints then the destination; active from the start when airborne
+    const g = av.gps; g.fpl = [...R.wpts, R.destW].filter(Boolean).map((w) => ({ ...w })); g.fplActive = false; g.leg = 0; g.wpt = null; g.origin = null; g.arrived = false;
+    if (!onGround && g.fpl.length && av.gpsActivate) {
+      av.gpsActivate(F);
+      const k = stage === 'cruise' ? Math.min(Math.max(0, (R.leg || 1) - 1), g.fpl.length - 1) : stage === 'final' ? g.fpl.length - 1 : 0;
+      g.leg = k; g.wpt = { ...g.fpl[k] }; g.msgs = [];
+    }
   }
   // weather
   const wr = s.windDir * D2R, ws = s.windKt * KT;
@@ -1073,7 +1100,18 @@ $('fly').onclick = () => {
   showMenu(false); $('hud').classList.remove('hidden'); $('crash').classList.add('hidden');
   sim.started = true; sim.panelDirty = true; togglePause(false);
   setView(sim.view === 'walk' ? 'cockpit' : sim.view);
-  toast(sim.fdm.eng.running ? 'Press ? for controls.  Mixture, trim and flaps are yours.' : `Parked cold & dark${sim.taxi ? ' — taxi to Rwy ' + sim.taxi.route.rwy + ' via ' + sim.taxi.route.viaText : ''}. Press H for the checklist and engine-start guide, T for the taxi line.`, 7000);
+  const R = sim.flight || {}, rt = R.dep ? `${R.dep} → ${R.dest}${R.wpts?.length ? ' via ' + R.wpts.map((w) => w.ident).join(' ') : ''}. ` : '';
+  const via = sim.taxi ? ' to Rwy ' + sim.taxi.route.rwy + ' via ' + sim.taxi.route.viaText : '';
+  const msg = {
+    cold: `Parked cold & dark${sim.taxi ? ' — taxi' + via : ''}. Press H for the checklist and engine-start guide, T for the taxi line.`,
+    running: `Engine running on the ramp, parking brake set. Call Ground for taxi (G)${via ? ' — expect Rwy ' + sim.taxi.route.rwy : ''}.`,
+    taxi: `Ready to taxi${via}. Read back the clearance (G), release the brake (P) and follow the taxi line (T).`,
+    runway: `Lined up on Rwy ${R.depRwy}. Call the tower (G), full throttle, rotate at 55 kt.`,
+    climb: `Climbing out of ${R.dep} on runway heading. GPS flight plan active — cruise ${R.crzFt} ft.`,
+    cruise: `En route at ${R.crzFt} ft, GPS flight plan active.`,
+    final: `On final for Rwy ${R.arrRwy} at ${R.dest}${R.arrILS ? ' — ILS tuned on NAV 1' : ''}.`,
+  }[R.state === 'running' ? 'running' : R.stage === 'ramp' ? 'cold' : R.stage] || 'Press ? for controls.';
+  toast(rt + msg, 8000);
   canvas.focus?.();
 };
 $('showHelp').onclick = () => setHelp(true);

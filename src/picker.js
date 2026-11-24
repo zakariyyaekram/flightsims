@@ -12,19 +12,22 @@
   let edition = null;
 
   function showStep(n) {
-    const s1 = $('editionStep'), s2 = $('aircraftStep');
+    const s1 = $('editionStep'), s2 = $('aircraftStep'), s3 = $('flightStep');
     if (s1) s1.classList.toggle('hidden', n !== 1);
     if (s2) s2.classList.toggle('hidden', n !== 2);
+    if (s3) s3.classList.toggle('hidden', n !== 3);
     const tag = $('editionTag'); if (tag) tag.textContent = edition === 'heavy' ? 'Heavy Edition' : 'Light Edition';
   }
   window.pickEdition = function (mode) { edition = mode === 'heavy' ? 'heavy' : 'light'; showStep(2); };
-  window.pickBack = function () { showStep(1); };
+  window.pickBack = function (n) { showStep(n === 2 ? 2 : 1); };
   window.pickAircraft = function (id) {
     const a = AIRCRAFT.find((x) => x.id === id); if (!a || !edition) return;
     if (a.page !== here) { location.href = `./${a.page}?edition=${edition}&aircraft=${a.id}`; return; }
     const sel = $('aircraftType');
     if (sel && [...sel.options].some((o) => o.value === id)) { sel.value = id; sel.dispatchEvent(new Event('change')); }
-    if (typeof window.startEdition === 'function') window.startEdition(edition);
+    const go = () => { if (typeof window.startEdition === 'function') window.startEdition(edition); };
+    // step 3: flight plan and start state (cold & dark ... in the air), then load
+    if (window.FlightSetup && $('flightStep')) window.FlightSetup.show(id, edition, go); else go();
   };
 
   function build() {

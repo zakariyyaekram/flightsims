@@ -8,15 +8,28 @@ import { chromium } from 'playwright';
 
 const which = process.argv[2] || 'takeoff';
 const base = process.argv[3] || 'http://localhost:8765/';
-const spawn = which === 'autoland' ? 'ILS28L' : 'SFO28L';
+const setup = which === 'autoland'
+  ? { dep: 'KSJC', dest: 'KSFO', arrRwy: '28L', state: 'air', air: 'final' }
+  : { dep: 'KSFO', depRwy: '28L', dest: 'KSJC', state: 'runway' };
 const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1000, height: 640 } });
+// step 3 of the start screen: flight plan and start state
+async function flightSetup(page, o) {
+  await page.waitForSelector('#fpGo', { state: 'visible', timeout: 30000 });
+  await page.evaluate((o) => {
+    const set = (id, v) => { const e = document.getElementById(id); if (v == null || !e) return; e.value = v; e.dispatchEvent(new Event('change', { bubbles: true })); e.dispatchEvent(new Event('input', { bubbles: true })); };
+    set('fpDep', o.dep); set('fpDepRwy', o.depRwy); set('fpDest', o.dest); set('fpArrRwy', o.arrRwy);
+    document.querySelector(`.fpState[data-state="${o.state}"]`)?.click();
+    set('fpAir', o.air);
+  }, o);
+  await page.click('#fpGo');
+}
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 await page.goto(base + 'a350.html?manual');
-await page.evaluate((s) => { document.getElementById('spawn').value = s; }, spawn);
 await page.click('#loadLight');
 await page.click('#aircraftList [data-aircraft="A350"]');
+await flightSetup(page, setup);
 for (let i = 0; i < 180 && !(await page.evaluate(() => window.sim?.started).catch(() => false)); i++) await page.waitForTimeout(1000);
 
 // in-page pilot: one call flies `secs` of simulated time in 50 ms steps and returns the new log lines

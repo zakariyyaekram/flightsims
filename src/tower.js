@@ -15,8 +15,8 @@
 //    short or go around;
 //  - one transmission at a time per frequency, readbacks follow the instruction (X-Plane 12 ATC style).
 import { AIRPORTS, runwayEnd } from './geo.js';
-import { onRunway, alongEnd, TYPE_NAME, flowInfo } from './traffic.js?v=20261124c';
-import { freqFor, facilityName, atisLetter, STATIONS } from './atc.js?v=20261124c';
+import { onRunway, alongEnd, TYPE_NAME, flowInfo } from './traffic.js?v=20261124e';
+import { freqFor, facilityName, atisLetter, STATIONS } from './atc.js?v=20261124e';
 
 const NM = 1852, FT = 0.3048, D2R = Math.PI / 180;
 const f2 = (f) => (Math.round(f * 1000) % 10 ? f.toFixed(3) : f.toFixed(2));
@@ -97,7 +97,8 @@ export class Tower {
   }
 
   /** release check for a departure (AI flight or the player) on runway r from end `end` */
-  depDecision(self, r, end, a0, heavy) {
+  depDecision(self, r, end, a0, heavy, lineup = 22) {
+    // line-up time counts toward every runway check (X-Plane 12.06): an aircraft still behind the hold line needs longer
     const U = this.U, a = AIRPORTS.find((q) => q.runways.includes(r));
     let luawOK = true, luawWhy = '';
     for (const u of U) {
@@ -111,9 +112,9 @@ export class Tower {
       }
       if (u.rw === r && u.kind === 'arr' && Number.isFinite(u.eta)) {
         const same = u.end.id === end.id;
-        if (same && u.eta < 75) return { hold: true, why: `traffic on ${Math.max(1, Math.round((u.dist ?? u.eta * 70) / NM))}-mile final${u.type ? ', ' + typeName(u.type) : ''}` };
+        if (same && u.eta < 55 + lineup) return { hold: true, why: `traffic on ${Math.max(1, Math.round((u.dist ?? u.eta * 70) / NM))}-mile final${u.type ? ', ' + typeName(u.type) : ''}` };
         if (!same && u.eta < 180) return { hold: true, why: 'opposite direction arrival' };
-        if (same && u.eta < 125) luawOK = false;
+        if (same && u.eta < 105 + lineup) luawOK = false;
       }
       if (u.rw === r && u.kind === 'missed' && u.agl < 300) return { hold: true, why: 'traffic on the go-around' };
     }
@@ -122,7 +123,9 @@ export class Tower {
       if (ix.r !== r) continue;
       const alI = alongEnd(end, ix.x, ix.z); if (alI < a0 - 60) continue;
       // + radio, line-up and spool-up time; heavies accelerate slower
-      const tDep = Math.sqrt(2 * Math.max(0, alI - a0) / (heavy ? 1.5 : 2.0)) + 22;
+      const tDep = Math.sqrt(2 * Math.max(0, alI - a0) / (heavy ? 1.5 : 2.0)) + lineup;
+      // wake: a heavy that just departed the crossing runway (FAA 7110.65 3-9-6/3-9-8)
+      const sx = this.rwState(ix.s); if (sx.heavy && this.t - sx.lastTO < 120 && !heavy) return { hold: true, why: 'wake turbulence, heavy departing crossing runway' };
       for (const u of U) {
         if (u === self || u.rw !== ix.s || !u.end) continue;
         const tA = tArr(u, ix);
@@ -190,16 +193,42 @@ export class Tower {
     this.sim = sim; this.t += dt; this.acc += dt;
     if (!sim.fdm) return;
     const F = sim.fdm;
-    this.traffic.player = { x: F.pos[0], z: F.pos[2], agl: F.agl ?? 0, onGround: !!F.onGround };
+    const V = F.vel || [0, 0, 0];
+    this.traffic.player = { x: F.pos[0], y: F.pos[1], z: F.pos[2], vx: V[0], vy: V[1], vz: V[2], v: Math.hypot(V[0], V[2]), agl: F.agl ?? 0, onGround: !!F.onGround, rad: sim.playerRad || 6 };
+    if (!this.hooked) {
+      this.hooked = true;
+      // the AI safety net (runway occupied on short final, airborne conflict) tells the tower so it's on frequency
+      this.traffic.onGoAround = (fl, why) => {
+        try {
+          const icao = fl.r.icao, twr = freqFor(icao, 'twr', fl.r.rwy), cs = fl.ga ? fl.spoken || fl.callsign : fl.callsign;
+          this.stats.goArounds++; fl.msg.ga = true;
+          this.say(twr, 'TOWER', `${cs}, go around, ${why}. Fly runway heading, climb and maintain 3,000.`, () => this.say(twr, fl.ident, `Going around, ${cs}.`, null, true), true);
+        } catch (e) { /* radio is cosmetic */ }
+      };
+    }
     this.pump(sim);
     if (this.acc < 0.5) return;
     this.acc = 0;
     this.U = this.users(sim);
     const wind = this.atc.windText(sim);
-    for (const u of this.U) if (u.fl) this.flight(u, wind, sim);
+    for (const u of this.U) if (u.fl) { try { this.flight(u, wind, sim); this.giveWay(u); } catch (e) { console.warn('tower', u.fl.callsign, e); } }
     this.spacing();
     this.playerLogic(sim);
     this.advisories(sim);
+  }
+
+  /** ground: tell a taxiing flight to give way when the traffic planner holds it for crossing traffic */
+  giveWay(u) {
+    const fl = u.fl; if (!fl.pos || fl.agl > 3) return;
+    const M = fl.msg, gnd = freqFor(fl.r.icao, 'gnd', fl.r.rwy), cs = fl.callsign;
+    if (fl.yieldKind === 'cross' && fl.v < 3 && !M.gw && this.t - (this.gwT || -99) > 20) {
+      const o = fl.yieldTo, what = o === 'player' ? 'traffic' : 'the ' + (TYPE_NAME[o.type] || 'traffic');
+      M.gw = true; this.gwT = this.t;
+      this.say(gnd, 'GROUND', `${cs}, hold position, give way to ${what} passing left to right.`.replace(' passing left to right', ''), () => this.say(gnd, fl.ident, `Holding position, ${cs}.`, null, true));
+    } else if (M.gw && !fl.yieldKind && fl.v > 2) {
+      M.gw = false;
+      this.say(gnd, 'GROUND', `${cs}, continue taxi.`, () => this.say(gnd, fl.ident, `Continuing, ${cs}.`, null, true));
+    }
   }
 
   flight(u, wind, sim) {
@@ -230,7 +259,8 @@ export class Tower {
       if ((fl.state === 'holding' || fl.state === 'luaw') && M.readyDone && !fl.pend && !fl.cleared.takeoff) {
         fl.holdT += 0.5;
         const a0 = Math.max(0, alongEnd(r.end, fl.pos.x, fl.pos.z));
-        const d = this.depDecision(u, r.rw, r.end, fl.state === 'luaw' ? a0 : r.a0, fl.heavy);
+        const lineup = fl.state === 'luaw' ? 6 : Math.max(0, r.sLine - fl.s) / 3 + 10;
+        const d = this.depDecision(u, r.rw, r.end, fl.state === 'luaw' ? a0 : r.a0, fl.heavy, lineup);
         if (d.go) {
           fl.cleared.takeoff = true; fl.pend = true; u.takeoff = true; this.stats.released++;
           const st = this.rwState(r.rw); st.lastTO = this.t; st.heavy = fl.heavy;
@@ -341,7 +371,7 @@ export class Tower {
     this.U = this.users(sim);
     const p = this.U.find((u) => u.player); if (!p || !p.rw) return { go: true };
     const a0 = Math.max(0, alongEnd(p.end, p.x, p.z));
-    return this.depDecision(p, p.rw, p.end, a0, false);
+    return this.depDecision(p, p.rw, p.end, a0, false, 30);
   }
   playerArrivalSequence(sim) {
     this.U = this.users(sim);
