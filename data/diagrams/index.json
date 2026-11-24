@@ -1,0 +1,342 @@
+{
+ "KSFO": {
+  "img": "KSFO.png",
+  "w": 1356,
+  "h": 2079,
+  "S": 3.5,
+  "a": [
+   5e-06,
+   -0.0886724
+  ],
+  "b": [
+   198.246,
+   267.15
+  ],
+  "rms": 0.6,
+  "cycle": "2611",
+  "eff": "29 OCT 2026 to 26 NOV 2026",
+  "src": "https://aeronav.faa.gov/d-tpp/2611/00375AD.PDF",
+  "hot": [
+   {
+    "n": 1,
+    "t": "Complex int Twy B and Twy F."
+   },
+   {
+    "n": 2,
+    "t": "Rwy 01L-19R, Twy C and Twy E."
+   },
+   {
+    "n": 3,
+    "t": "Acft exiting Rwy 28R on Twy T: Taxi aircraft up to and hold short of Rwy 28L unless specifically cleared to cross. Twy T has hold short lines for both Rwy 28R and Rwy 28L. Be sure to identify the correct hold short line for Rwy 28L to ensure aircraft tail is fully clear of Rwy 28R."
+   },
+   {
+    "n": 4,
+    "t": "Runway incursion risk. ATC may request aircraft to hold on a RWY short of an intersection with another RWY. At runway intersections, vertical holding position signs exist with no surface painted markings. When instructed, pilots must hold short of the holding position signs."
+   }
+  ],
+  "hotSrc": "https://aeronav.faa.gov/d-tpp/2611/SW2HOTSPOT.PDF"
+ },
+ "KOAK": {
+  "img": "KOAK.png",
+  "w": 1356,
+  "h": 2079,
+  "S": 3.5,
+  "a": [
+   0.0787569,
+   0.0003697
+  ],
+  "b": [
+   -899.899,
+   1173.798
+  ],
+  "rms": 8.4,
+  "cycle": "2611",
+  "eff": "29 OCT 2026 to 26 NOV 2026",
+  "src": "https://aeronav.faa.gov/d-tpp/2611/00294AD.PDF",
+  "hot": [
+   {
+    "n": 1,
+    "t": "Rwy 28R, Twy A and Twy B."
+   },
+   {
+    "n": 2,
+    "t": "Rwy 10L-28R, Twy H, Twy G, Twy C and Twy D."
+   },
+   {
+    "n": 3,
+    "t": "Runway incursion risk. Twy C between Twy C1 and Twy J. APCH/DEP hold in effect when instructed by ATC."
+   }
+  ],
+  "hotSrc": "https://aeronav.faa.gov/d-tpp/2611/SW2HOTSPOT.PDF"
+ },
+ "KSJC": {
+  "img": "KSJC.png",
+  "w": 1356,
+  "h": 2079,
+  "S": 3.5,
+  "a": [
+   0.0944874,
+   0.0006638
+  ],
+  "b": [
+   -3558.262,
+   -2429.155
+  ],
+  "rms": 8.6,
+  "cycle": "2611",
+  "eff": "29 OCT 2026 to 26 NOV 2026",
+  "src": "https://aeronav.faa.gov/d-tpp/2611/00693AD.PDF",
+  "hot": [
+   {
+    "n": 1,
+    "t": "Rwy incursion risk. Rwy 30L at Twy D. Short distance from run-up area to Rwy."
+   }
+  ],
+  "hotSrc": "https://aeronav.faa.gov/d-tpp/2611/SW2HOTSPOT.PDF"
+ },
+ "KNUQ": {
+  "img": "KNUQ.png",
+  "w": 1356,
+  "h": 2079,
+  "S": 3.5,
+  "a": [
+   0.1420812,
+   0.0002819
+  ],
+  "b": [
+   -3982.964,
+   -2880.83
+  ],
+  "rms": 44.2,
+  "cycle": "2611",
+  "eff": "29 OCT 2026 to 26 NOV 2026",
+  "src": "https://aeronav.faa.gov/d-tpp/2611/00410AD.PDF",
+  "hot": [],
+  "hotSrc": "https://aeronav.faa.gov/d-tpp/2611/SW2HOTSPOT.PDF"
+ },
+ "KHWD": {
+  "img": "KHWD.png",
+  "w": 1356,
+  "h": 2079,
+  "S": 3.5,
+  "a": [
+   0.000595,
+   -0.2193096
+  ],
+  "b": [
+   1127.603,
+   5250.611
+  ],
+  "rms": 9.8,
+  "cycle": "2611",
+  "eff": "29 OCT 2026 to 26 NOV 2026",
+  "src": "https://aeronav.faa.gov/d-tpp/2611/05015AD.PDF",
+  "hot": [
+   {
+    "n": 1,
+    "t": "Rwy 10L-28R, Twy E and Twy A."
+   },
+   {
+    "n": 2,
+    "t": "Area not visible from ATCT."
+   },
+   {
+    "n": 3,
+    "t": "Area not visible from ATCT."
+   },
+   {
+    "n": 4,
+    "t": "Area not visible from ATCT."
+   },
+   {
+    "n": 5,
+    "t": "Rwy 28L hold bars on Twy A1 and Twy Z1."
+   }
+  ],
+  "hotSrc": "https://aeronav.faa.gov/d-tpp/2611/SW2HOTSPOT.PDF"
+ },
+ "KSQL": {
+  "img": "KSQL.png",
+  "w": 1356,
+  "h": 2079,
+  "S": 3.5,
+  "a": [
+   0.2818471,
+   0.0004086
+  ],
+  "b": [
+   -3054.328,
+   -3118.525
+  ],
+  "rms": 0.0,
+  "cycle": "2611",
+  "eff": "29 OCT 2026 to 26 NOV 2026",
+  "src": "https://aeronav.faa.gov/d-tpp/2611/09219AD.PDF",
+  "hot": [],
+  "hotSrc": "https://aeronav.faa.gov/d-tpp/2611/SW2HOTSPOT.PDF"
+ },
+ "KPAO": {
+  "img": "KPAO.png",
+  "w": 1356,
+  "h": 2079,
+  "S": 3.5,
+  "a": [
+   0.3155905,
+   0.0007051
+  ],
+  "b": [
+   -7184.873,
+   -5368.157
+  ],
+  "rms": 0.0,
+  "cycle": "2611",
+  "eff": "29 OCT 2026 to 26 NOV 2026",
+  "src": "https://aeronav.faa.gov/d-tpp/2611/09216AD.PDF",
+  "hot": [],
+  "hotSrc": "https://aeronav.faa.gov/d-tpp/2611/SW2HOTSPOT.PDF"
+ },
+ "KLVK": {
+  "img": "KLVK.png",
+  "w": 1356,
+  "h": 2079,
+  "S": 3.5,
+  "a": [
+   0.0016723,
+   -0.2185382
+  ],
+  "b": [
+   1906.485,
+   11131.499
+  ],
+  "rms": 14.7,
+  "cycle": "2611",
+  "eff": "29 OCT 2026 to 26 NOV 2026",
+  "src": "https://aeronav.faa.gov/d-tpp/2611/06075AD.PDF",
+  "hot": [
+   {
+    "n": 1,
+    "t": "Pilots instructed to hold short of Rwy 25R at Twy B sometimes fail to comply. Pilots sometimes land on Rwy 25R without clearance."
+   },
+   {
+    "n": 2,
+    "t": "Pilots instructed to hold short of Rwy 25L at Twy C sometimes fail to comply."
+   },
+   {
+    "n": 3,
+    "t": "Pilots instructed to hold short of Rwy 07L at Twy H sometimes fail to comply."
+   },
+   {
+    "n": 4,
+    "t": "Pilots instructed to hold short of Rwy 07R at Twy G sometimes fail to comply."
+   },
+   {
+    "n": 5,
+    "t": "Pilots instructed to hold short of Rwy 25R at Twy G sometimes fail to comply."
+   },
+   {
+    "n": 6,
+    "t": "Pilots may be confused at the intersections of Twy J, Twy A, and Twy G sometimes fail to comply with taxi instructions."
+   }
+  ],
+  "hotSrc": "https://aeronav.faa.gov/d-tpp/2611/SW2HOTSPOT.PDF"
+ },
+ "KCCR": {
+  "img": "KCCR.png",
+  "w": 1356,
+  "h": 2079,
+  "S": 3.5,
+  "a": [
+   0.2196852,
+   -6.84e-05
+  ],
+  "b": [
+   -6021.597,
+   9275.852
+  ],
+  "rms": 19.1,
+  "cycle": "2611",
+  "eff": "29 OCT 2026 to 26 NOV 2026",
+  "src": "https://aeronav.faa.gov/d-tpp/2611/05320AD.PDF",
+  "hot": [
+   {
+    "n": 1,
+    "t": "Wrong SFC Departure Risk. Rwy 32L Run-up area and Twy J. Twy J can be mistaken for Rwy 32L."
+   },
+   {
+    "n": 2,
+    "t": "Risk of runway incursion and/or surface incident. Twy J, Twy A, Twy C, and Twy K. Expanse pavement and complex geometry due to converging Twys."
+   },
+   {
+    "n": 3,
+    "t": "Runway incursion risk. Rwy 32L apch hold area on Twy A between Twys J and B. Holding Position Marking in an unexpected location."
+   },
+   {
+    "n": 4,
+    "t": "Rwy incursion risk. Twys J, B and Rwy 32R run-up area. Potential for expectation bias of run-up area location, and loss of situational awareness due to wide expanse of pavement."
+   }
+  ],
+  "hotSrc": "https://aeronav.faa.gov/d-tpp/2611/SW2HOTSPOT.PDF"
+ },
+ "KAPC": {
+  "img": "KAPC.png",
+  "w": 1356,
+  "h": 2079,
+  "S": 3.5,
+  "a": [
+   0.1759845,
+   0.0001817
+  ],
+  "b": [
+   -1371.099,
+   11878.057
+  ],
+  "rms": 2.8,
+  "cycle": "2611",
+  "eff": "29 OCT 2026 to 26 NOV 2026",
+  "src": "https://aeronav.faa.gov/d-tpp/2611/00281AD.PDF",
+  "hot": [
+   {
+    "n": 1,
+    "t": "Surface Incident Risk. Twy A, Twy A2, Twy C, Twy E, and the ramp. Complex geometry due to converging Twys."
+   },
+   {
+    "n": 2,
+    "t": "Runway Incursion Risk. Twy A at Rwy 24. Short distance from ramp to Rwy."
+   },
+   {
+    "n": 3,
+    "t": "Runway Incursion Risk. Rwy 1L, Rwy 6, and Twy H. Aircraft taxiing outbound for departure will encounter runway position hold markings in an unexpected location. Aircraft landing Rwy 19R, must receive ATC authorization to exit onto Rwys 06-24."
+   }
+  ],
+  "hotSrc": "https://aeronav.faa.gov/d-tpp/2611/SW2HOTSPOT.PDF"
+ },
+ "KRHV": {
+  "img": "KRHV.png",
+  "w": 1356,
+  "h": 2079,
+  "S": 3.5,
+  "a": [
+   0.2837245,
+   0.0013007
+  ],
+  "b": [
+   -13845.903,
+   -8755.145
+  ],
+  "rms": 0.8,
+  "cycle": "2611",
+  "eff": "29 OCT 2026 to 26 NOV 2026",
+  "src": "https://aeronav.faa.gov/d-tpp/2611/05591AD.PDF",
+  "hot": [
+   {
+    "n": 1,
+    "t": "Numerous inbounds and outbounds at twy intersections Twy D, Twy Z, and Twy Y."
+   },
+   {
+    "n": 2,
+    "t": "Maintain vigilance when maneuvering at Twy Y, Twy Z, and Twys Z1, Z2, Z3 and Z4."
+   }
+  ],
+  "hotSrc": "https://aeronav.faa.gov/d-tpp/2611/SW2HOTSPOT.PDF"
+ }
+}

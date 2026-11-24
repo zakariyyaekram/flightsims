@@ -87,6 +87,8 @@ kbd { font: 500 12px var(--mono); border: 1px solid var(--line); border-radius: 
 .atcLine { display: grid; grid-template-columns: 58px 1fr; gap: 8px; margin-bottom: 6px; font-size: 12px; line-height: 1.28; }
 .atcLine b { color: #86b7d1; font: 700 10px var(--mono); }
 .atcLine.you b { color: #ffc878; }
+.atcLine.ai { opacity: .78; }
+.atcLine.ai b { color: #9fd49a; }
 #atcTransmission { padding: 10px 12px 6px; }
 #atcSpeaker { color: #86b7d1; font: 700 10px var(--mono); letter-spacing: .08em; }
 #atcTransmission p { margin: 5px 0 0; color: #edf3f6; font-size: 14px; line-height: 1.35; }
@@ -225,10 +227,14 @@ kbd { font: 500 12px var(--mono); border: 1px solid var(--line); border-radius: 
 #taxiMap.hidden { display: none; }
 #taxiMap .tmHead { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 2px solid #111; font-size: 13px; letter-spacing: .04em; }
 #taxiMap .tmHead b { font-size: 15px; }
+#taxiMap .tmHead > div:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#taxiMap .tmBtns { flex-shrink: 0; white-space: nowrap; }
 #taxiMap .tmBtns button { font: 700 11px ui-monospace, monospace; margin-left: 6px; padding: 5px 9px; background: #f1f1f1; color: #111; border: 1px solid #111; border-radius: 3px; cursor: pointer; }
 #taxiMap .tmBtns button.on { background: #0a7cff; color: #fff; border-color: #0a7cff; }
 #tmCanvas { flex: 1; width: 100%; min-height: 0; cursor: grab; display: block; }
-#tmInfo { position: absolute; left: 12px; top: 48px; padding: 4px 8px; background: rgba(255,255,255,.9); border: 1px solid #111; font: 600 12px ui-sans-serif, system-ui; }
+#tmInfo { position: absolute; left: 12px; top: 48px; max-width: min(62%, 760px); max-height: 22%; overflow: hidden; line-height: 1.35; padding: 4px 8px; background: rgba(255,255,255,.9); border: 1px solid #111; font: 600 12px ui-sans-serif, system-ui; }
+#taxiMap .tmLegend.chart .vec { display: none; }
+#taxiMap .lg.ai { background: #e08a00; } #taxiMap .lg.aa { background: #00a3c7; } #taxiMap .lg.ah { background: #d21c1c; }
 #taxiMap .tmLegend { display: flex; flex-wrap: wrap; gap: 14px; padding: 6px 12px; border-top: 1px solid #111; font-size: 11px; color: #333; }
 #taxiMap .lg { display: inline-block; width: 18px; height: 8px; margin-right: 5px; vertical-align: middle; border: 1px solid #555; }
 .lg.rw { background: #111; } .lg.tw { background: #c4c6c8; } .lg.ap { background: #d9dadb; } .lg.bd { background: #a6a8aa; } .lg.hs { background: #d6a400; border: 0; height: 3px; } .lg.rt { background: #d600aa; border: 0; height: 4px; }

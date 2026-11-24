@@ -14,15 +14,16 @@ import { Avionics, ILS } from './avionics.js?v=20261123g';
 import { Environment } from './env.js';
 import { buildAirports, RockField, Forest, GrassField } from './world.js';
 import { Scenery } from './scenery.js?v=20261123g';
-import { Traffic } from './traffic.js?v=20261123g';
+import { Traffic } from './traffic.js?v=20261124c';
+import { Tower } from './tower.js?v=20261124c';
 import { buildLife } from './life.js?v=20261123g';
 import { MovingMap } from './map.js?v=20261123g';
-import { departureRoute, routeProgress } from './taxi.js?v=20261123g';
-import { toggleTaxiMap, updateTaxiMap, taxiMapOpen } from './taximap.js?v=20261123g';
+import { departureRoute, routeProgress } from './taxi.js?v=20261124c';
+import { toggleTaxiMap, updateTaxiMap, taxiMapOpen, taxiChart } from './taximap.js?v=20261124c';
 import { Checklist } from './checklist.js?v=20261123g';
 import { Sound } from './audio.js';
 import { setAniso } from './textures.js';
-import { ATC } from './atc.js?v=20261123g';
+import { ATC } from './atc.js?v=20261124c';
 import { PlayerGroundServices } from './groundservices.js?v=20261124b';
 import { tickGSE } from './gse.js?v=20261124b';
 import { remap, buildControlsUI, changedCount, mouseSettings, mouseAxis } from './controls.js?v=20261123g';
@@ -291,6 +292,7 @@ async function init() {
   traffic = new Traffic(scene, { light: loadMode === 'light' });
   await traffic.init(buildAircraft);
   traffic.setEnabled(sim.aiTrafficEnabled !== false);
+  sim.tower = new Tower(traffic, sim.atc); traffic.sim = sim; sim.taxiChart = taxiChart; taxiChart('KSFO');
   sim.traffic = traffic; sim.scenery = scenery; sim.airports = airports; sim.terrain = terrain;
   if (scenery) for (let i = 0; i < 60; i++) scenery.update({ x: sim.fdm.pos[0], z: sim.fdm.pos[2] });
 
@@ -423,6 +425,7 @@ function applySetup(s, warmOnly = false) {
     default: { const r = rwyStart('KSFO', '28L'); pos = r.p; hdg = r.hdg; }
   }
   sim.atc.reset(s);
+  if (sim.tower) sim.tower.q.clear();
   sim.av.com1.active = sim.atc.frequency;
   const localGh = heightAt(pos.x, pos.z);
   const cesiumGh = getCesiumElevationWorld(pos.x, pos.z);
@@ -967,24 +970,29 @@ function toggleATC(force) {
   const panel = $('atcPanel');
   const on = force ?? panel.classList.contains('hidden');
   panel.classList.toggle('hidden', !on);
-  if (on) updateATCPanel();
+  if (on) updateATCPanel(true);
 }
 
-function updateATCPanel() {
+let atcSig = '';
+function updateATCPanel(force) {
   const atc = sim.atc;
+  const opts = [...atc.options, ...atc.extraOptions];
+  const sig = atc.status + '|' + atc.transmission + '|' + (atc.log[0]?.id || 0) + '|' + opts.map((o) => o.label).join(',');
+  if (!force && sig === atcSig) return;
+  atcSig = sig;
   $('atcStatus').textContent = atc.status;
   $('atcSpeaker').textContent = atc.speaker;
   $('atcMessage').textContent = atc.transmission;
   const log = $('atcLog');
-  log.innerHTML = atc.log.map((line) => `<div class="atcLine ${line.speaker === 'YOU' ? 'you' : ''}"><b>${line.speaker}</b><span>${line.text}</span></div>`).join('');
-  log.scrollTop = log.scrollHeight;
+  log.innerHTML = atc.log.map((line) => `<div class="atcLine ${line.speaker === 'YOU' ? 'you' : line.ai ? 'ai' : ''}"><b>${line.speaker}</b><span>${line.text}</span></div>`).join('');
+  log.scrollTop = 0; // newest first
   const options = $('atcOptions');
   options.replaceChildren();
-  for (const option of atc.options) {
+  for (const option of opts) {
     const button = document.createElement('button');
     button.type = 'button';
     button.textContent = option.label;
-    button.onclick = () => { atc.act(option.action, sim); updateATCPanel(); sim.panelDirty = true; };
+    button.onclick = () => { atc.act(option.action, sim); updateATCPanel(true); sim.panelDirty = true; };
     options.appendChild(button);
   }
 }
@@ -1127,6 +1135,7 @@ function frame(dtReal) {
     physics(dt);
     if (sim.gs) { sim.gs.update(dt * sim.simRate, simT); sim.gs.applyPush(); }
     sim.atc.update(sim, dt * sim.simRate);
+    sim.tower?.update(sim, dt * sim.simRate);
     sim.checklist?.update(dt);
     updateTaxiGuide(dt);
     simT += dt * sim.simRate;

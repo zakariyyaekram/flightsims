@@ -1,7 +1,8 @@
 // Taxi routing over the real OSM taxiway network: ramp -> hold-short of the departure runway.
 // Graph nodes are taxiway polyline vertices (OSM ways share nodes at junctions); a few extra
 // links join vertices that sit on, or very near, another taxiway so T-junctions connect.
-import { findRunway, runwayEnd } from './geo.js';
+import { AIRPORTS, findRunway, runwayEnd } from './geo.js';
+const AIRPORTS_BY = (icao) => AIRPORTS.find((q) => q.icao === icao);
 
 const key = (p) => Math.round(p[0] * 2) + ',' + Math.round(p[1] * 2);
 
@@ -47,34 +48,105 @@ function nameOf(ref) {
   return ref.replace(/^([A-Z])(\d*)$/, (m, l, d) => (ph[l] || l) + (d ? ' ' + d : ''));
 }
 
+
+// Dijkstra over the taxi graph from every off-runway node within `seedR` of (x, z);
+// crossing / using any runway surface is heavily penalised, apron lanes slightly
+function search(a, x, z, seedR = 200, avoid = null) {
+  const G = buildGraph(a); const { nodes, adj } = G; if (!nodes.length) return null;
+  const N = nodes.length, dist = new Float64Array(N).fill(Infinity), prev = new Int32Array(N).fill(-1), done = new Uint8Array(N);
+  if (!G.rw) { G.rw = new Uint8Array(N); for (let i = 0; i < N; i++) G.rw[i] = onRunway(a, nodes[i].x, nodes[i].z, 3) ? 1 : 0; }
+  const rw = G.rw, heap = [];
+  const push = (d, i) => { heap.push([d, i]); let k = heap.length - 1; while (k) { const p = (k - 1) >> 1; if (heap[p][0] <= heap[k][0]) break; [heap[p], heap[k]] = [heap[k], heap[p]]; k = p; } };
+  const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let k = 0; for (;;) { const l = 2 * k + 1, rr = l + 1; let m = k; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (rr < heap.length && heap[rr][0] < heap[m][0]) m = rr; if (m === k) break; [heap[m], heap[k]] = [heap[k], heap[m]]; k = m; } } return top; };
+  let seeded = 0, nearest = -1, nd = Infinity;
+  for (let i = 0; i < N; i++) {
+    if (rw[i]) continue; const d = Math.hypot(nodes[i].x - x, nodes[i].z - z);
+    if (d < nd) { nd = d; nearest = i; }
+    if (d < seedR) { dist[i] = d * 1.6; push(dist[i], i); seeded++; }
+  }
+  if (nearest < 0) return null;
+  if (!seeded) { dist[nearest] = nd * 1.6; push(dist[nearest], nearest); }
+  while (heap.length) {
+    const [d, i] = pop(); if (done[i]) continue; done[i] = 1;
+    for (const e of adj[i]) {
+      const w = e.d * (rw[e.j] || rw[i] ? 6 : 1) * (e.lane ? 1.15 : 1) * (avoid && avoid(nodes[e.j]) ? 4 : 1);
+      if (d + w < dist[e.j]) { dist[e.j] = d + w; prev[e.j] = i; push(d + w, e.j); }
+    }
+  }
+  return { N, dist, prev, rw, nodes, adj };
+}
+function pathOut(D, g, x, z) {
+  const { prev, nodes, adj } = D;
+  const path = []; for (let i = g; i >= 0; i = prev[i]) path.push(i); path.reverse();
+  const pts = [{ x, z }, ...path.map((i) => ({ x: nodes[i].x, z: nodes[i].z }))];
+  const via = [];
+  for (let k = 1; k < path.length; k++) { const e = adj[path[k - 1]].find((q) => q.j === path[k]); const ref = e?.ref || ''; if (ref && via[via.length - 1] !== ref && ref.length <= 4) via.push(ref); }
+  let len = 0; for (let k = 1; k < pts.length; k++) len += Math.hypot(pts[k].x - pts[k - 1].x, pts[k].z - pts[k - 1].z);
+  return { pts, via, viaText: via.length ? via.map(nameOf).join(', ') : 'the parallel taxiway', len };
+}
+
+/** Taxi path between two arbitrary points on the airport (used by the AI: runway exit -> gate). */
+export function taxiPath(icao, x0, z0, x1, z1) {
+  const a = AIRPORTS_BY(icao); if (!a) return null;
+  const D = search(a, x0, z0, 60); if (!D) return null;
+  let g = -1, gd = Infinity;
+  for (let i = 0; i < D.N; i++) { if (!isFinite(D.dist[i]) || D.rw[i]) continue; const d = Math.hypot(D.nodes[i].x - x1, D.nodes[i].z - z1); if (d < gd) { gd = d; g = i; } }
+  if (g < 0) return null;
+  const o = pathOut(D, g, x0, z0); o.pts.push({ x: x1, z: z1 }); return o;
+}
+
+/** First usable runway exit ahead of `along` (metres past the threshold of runway end rwyId):
+ *  a junction node on the runway and the first taxiway node clear of it. Prefers the side `side` (+1 left / -1 right). */
+export function runwayExit(icao, rwyId, along, side = 0) {
+  const f = findRunway(icao, rwyId); if (!f) return null;
+  const { a, r } = f, end = runwayEnd(r, f.e), G = buildGraph(a);
+  if (!G.rw) search(a, end.x, end.z, 1);
+  const { nodes, adj, rw } = G, d = end.dir, lx = d[1], lz = -d[0];
+  let best = null, bs = Infinity;
+  for (let i = 0; i < nodes.length; i++) {
+    if (rw[i]) continue;
+    const n = nodes[i], dx = n.x - end.x, dz = n.z - end.z, al = dx * d[0] + dz * d[1], lat = dx * lx + dz * lz, edge = Math.abs(lat) - r.wid / 2;
+    if (al < along || al > along + 1400 || edge < 12 || edge > 90) continue;
+    const j = adj[i].find((e) => rw[e.j]); if (!j) continue;
+    const J = nodes[j.j], jal = (J.x - end.x) * d[0] + (J.z - end.z) * d[1];
+    if (jal < along - 40) continue;
+    const sc = (al - along) + edge * 0.6 + (side && Math.sign(lat) !== side ? 250 : 0) + (al - jal < -30 ? 200 : 0);
+    if (sc < bs) { bs = sc; best = { x: n.x, z: n.z, along: al, jAlong: jal, lat: Math.sign(lat) }; }
+  }
+  return best;
+}
+
+/** Hold-short points where a 2-D path enters any runway's hold area. Inserts the exact hold point into
+ *  the returned copy of `pts` and reports {k (index of the hold point), r (runway)} for each crossing. */
+export function runwayCrossings(icao, pts, skip = null) {
+  const a = AIRPORTS_BY(icao); const out = [], P = [pts[0]];
+  const hc = (r) => (r.len > 2400 ? 76 : r.wid >= 30 ? 60 : 40);
+  const inside = (r, p) => { const l = rLocal(r, p.x, p.z); return Math.abs(l.u) < r.len / 2 + 30 && Math.abs(l.v) < hc(r) - 2; };
+  const state = new Map(a.runways.map((r) => [r, inside(r, pts[0])]));
+  for (let k = 1; k < pts.length; k++) {
+    const A = pts[k - 1], B = pts[k];
+    for (const r of a.runways) {
+      const was = state.get(r), now = inside(r, B); state.set(r, now);
+      if (!now || was || r === skip) continue;
+      // bisect for the entry point, then step back 3 m so the nose stops short of the line
+      let lo = 0, hi = 1; for (let it = 0; it < 18; it++) { const m = (lo + hi) / 2; inside(r, { x: A.x + (B.x - A.x) * m, z: A.z + (B.z - A.z) * m }) ? (hi = m) : (lo = m); }
+      const L = Math.hypot(B.x - A.x, B.z - A.z) || 1, t = Math.max(0, lo - 3 / L);
+      P.push({ x: A.x + (B.x - A.x) * t, z: A.z + (B.z - A.z) * t }); out.push({ k: P.length - 1, r });
+    }
+    P.push(B);
+  }
+  return { pts: P, cross: out };
+}
+
 /** Route from (x, z) to the hold-short line of runway `rwyId` at airport `icao`.
  *  Returns { pts:[{x,z}], via:[ref], viaText, hold:{x,z}, rwy, len } or null. */
 export function taxiRoute(icao, rwyId, x, z) {
   const f = findRunway(icao, rwyId); if (!f) return null;
   const a = f.a, r = f.r, end = runwayEnd(r, f.e);
   const G = buildGraph(a); const { nodes, adj } = G; if (!nodes.length) return null;
-  // Dijkstra; crossing / using any runway surface is heavily penalised, apron lanes slightly
-  const N = nodes.length, dist = new Float64Array(N).fill(Infinity), prev = new Int32Array(N).fill(-1), done = new Uint8Array(N);
-  const rw = new Uint8Array(N); for (let i = 0; i < N; i++) rw[i] = onRunway(a, nodes[i].x, nodes[i].z, 3) ? 1 : 0;
-  const heap = [];
-  const push = (d, i) => { heap.push([d, i]); let k = heap.length - 1; while (k) { const p = (k - 1) >> 1; if (heap[p][0] <= heap[k][0]) break; [heap[p], heap[k]] = [heap[k], heap[p]]; k = p; } };
-  const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let k = 0; for (;;) { const l = 2 * k + 1, rr = l + 1; let m = k; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (rr < heap.length && heap[rr][0] < heap[m][0]) m = rr; if (m === k) break; [heap[m], heap[k]] = [heap[k], heap[m]]; k = m; } } return top; };
   // start: every off-runway node within 200 m of the aircraft (straight-line taxi across the apron to reach it)
-  let seeded = 0, nearest = -1, nd = Infinity;
-  for (let i = 0; i < N; i++) {
-    if (rw[i]) continue; const d = Math.hypot(nodes[i].x - x, nodes[i].z - z);
-    if (d < nd) { nd = d; nearest = i; }
-    if (d < 200) { dist[i] = d * 1.6; push(dist[i], i); seeded++; }
-  }
-  if (!seeded && nearest >= 0) { dist[nearest] = nd * 1.6; push(dist[nearest], nearest); }
-  if (nearest < 0) return null;
-  while (heap.length) {
-    const [d, i] = pop(); if (done[i]) continue; done[i] = 1;
-    for (const e of adj[i]) {
-      const w = e.d * (rw[e.j] || rw[i] ? 6 : 1) * (e.lane ? 1.15 : 1);
-      if (d + w < dist[e.j]) { dist[e.j] = d + w; prev[e.j] = i; push(d + w, e.j); }
-    }
-  }
+  const D = search(a, x, z, 200); if (!D) return null;
+  const { N, dist, prev, rw } = D;
   // goal: a reachable node beside the departure runway near its threshold, clear of the runway
   const thrU = rLocal(r, end.x, end.z).u, sgn = f.e === 0 ? 1 : -1; // +sgn = down the runway
   const holdLat = (r.wid >= 45 ? 80 : 42) - r.wid / 2; // hold line distance from the centreline (AC 150/5300-13)
