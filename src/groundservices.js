@@ -9,7 +9,7 @@
 import * as THREE from 'three';
 import { AIRPORTS, pointInPoly, toLocal } from './geo.js';
 import { qFromHPR } from './math.js';
-import { GSE, gseLowDetail, MB, JetBridge, makePerson, posePerson, setLift, setBelt, setTowbar, hoseMesh, sagPoints, gateSignAtlas } from './gse.js';
+import { GSE, gseLowDetail, withGSEAirport, gseProfile, MB, JetBridge, makePerson, posePerson, setLift, setBelt, setTowbar, hoseMesh, sagPoints, gateSignAtlas } from './gse.js?v=20261124b';
 import { buildAirliner } from './airliner.js';
 
 const D2R = Math.PI / 180;
@@ -122,13 +122,15 @@ export class PlayerGroundServices {
     const off = [this.engineOff(), 'Shut down the engine (prop must be stopped)'];
     const brake = [F.ctrl.parkBrake, 'Set the parking brake (P)'];
     const cap = F.aircraft.fuelCapGal;
+    const prof = gseProfile(this.ctx.airport?.icao); const fboName = prof.id ? fboTitle(prof.fbo.name) : 'FBO';
     return [
-      { id: 'fuel', icon: 'fuel', name: 'Refuel · 100LL truck', desc: `Line service fuels both wings from the top. ${(S.fuelL + S.fuelR).toFixed(1)} / ${(cap * 2).toFixed(0)} gal on board.`, why: need(...base, off, brake, [!this.jobs.has('push'), 'Wait for the tow to finish'], [S.fuelL + S.fuelR < cap * 2 - 0.3, 'Tanks are full']), opt: 'fuel' },
+      prof.noAvgas ? { id: 'fuel', icon: 'fuel', name: 'Refuel · 100LL', na: `Not available — ${fboName} at ${this.ctx.label} sells Jet A only, no 100LL.` } :
+      { id: 'fuel', icon: 'fuel', name: `Refuel · ${fboName} 100LL truck`, desc: `${fboName} line service fuels both wings from the top. ${(S.fuelL + S.fuelR).toFixed(1)} / ${(cap * 2).toFixed(0)} gal on board.`, why: need(...base, off, brake, [!this.jobs.has('push'), 'Wait for the tow to finish'], [S.fuelL + S.fuelR < cap * 2 - 0.3, 'Tanks are full']), opt: 'fuel' },
       { id: 'gpu', icon: 'gpu', name: 'Ground power · 28 V cart', desc: 'External power for avionics and a strong battery on engine start.', why: need(...base, [!this.jobs.has('push'), 'Wait for the tow to finish']), toggle: S.extPower },
       { id: 'board', icon: 'board', name: 'Board passengers', desc: `${this.pax} of ${seats} passenger seat${seats > 1 ? 's' : ''} occupied. Passengers walk out from the FBO.`, why: need(...base, off, brake, [this.pax < seats, 'All seats are taken'], [!busy(['deboard', 'push']), 'Another service is using the doors']), opt: 'pax' },
       { id: 'deboard', icon: 'deboard', name: 'Deboard passengers', desc: 'Passengers are escorted back to the FBO.', why: need(...base, off, brake, [this.pax > 0, 'No passengers on board'], [!busy(['board', 'push']), 'Another service is using the doors']) },
       { id: 'bags', icon: 'bags', name: 'Load baggage', desc: `Baggage compartment behind the rear seats (max 120 lb). ${this.bags} item${this.bags === 1 ? '' : 's'} loaded.`, why: need(...base, off, brake, [this.bags < 3, 'Baggage area is full'], [!this.jobs.has('push'), 'Wait for the tow to finish']) },
-      { id: 'catering', icon: 'catering', name: 'Catering · FBO van', desc: 'Snacks, water and coffee delivered to the cabin door.', why: need(...base, off, brake, [!this.jobs.has('push'), 'Wait for the tow to finish']) },
+      { id: 'catering', icon: 'catering', name: `Catering · ${fboName} van`, desc: 'Snacks, water and coffee delivered to the cabin door.', why: need(...base, off, brake, [!this.jobs.has('push'), 'Wait for the tow to finish']) },
       { id: 'push', icon: 'tug', name: 'Tow / pushback · tug or tow bar', desc: 'Choose a TowMaster tug that cradles the nose wheel, or a line tech with a hand tow bar (slower, tighter turns). Release the brake when connected.', why: need(...base, off, [!['fuel', 'board', 'deboard', 'bags', 'catering'].some((i) => this.jobs.has(i)), 'Finish the other services first'], [!S.extPower && !this.jobs.has('gpu'), 'Disconnect ground power first']), opt: 'push' },
       { id: 'bridge', icon: 'bridge', name: 'Jet bridge', na: `Not available — the ${name} has no airliner door; jet bridges dock to airliners at terminal gates.` },
       { id: 'stairs', icon: 'stairs', name: 'Passenger air stairs', na: `Not needed — the ${name} cabin door is at ground level.` },
@@ -191,11 +193,11 @@ export class PlayerGroundServices {
     if (this.jobs.has(id)) return;
     if (s.why) { this.toast(s.why, 3000); return; }
     const make = { fuel: () => this.jobFuel(), gpu: () => this.jobGpu(), board: () => this.jobBoard(), deboard: () => this.jobDeboard(), bags: () => this.jobBags(), catering: () => this.jobCatering(), push: () => this.jobPush() }[id];
-    const j = make(); j.id = id; this.jobs.set(id, j); this.render(true);
+    const j = withGSEAirport(this.ctx.airport?.icao, make); j.id = id; this.jobs.set(id, j); this.render(true);
   }
   cancel(id) {
     const j = this.jobs.get(id);
-    if (id === 'gpu' && !j && this.sim.fdm.sys.extPower) { const g = this.jobGpu(true); g.id = 'gpu'; this.jobs.set('gpu', g); return; }
+    if (id === 'gpu' && !j && this.sim.fdm.sys.extPower) { const g = withGSEAirport(this.context().airport?.icao, () => this.jobGpu(true)); g.id = 'gpu'; this.jobs.set('gpu', g); return; }
     if (!j) return;
     if (id === 'gpu' && j.phase === 'active') { j.release = true; return; }
     if (id === 'push' && j.phase === 'active') { this.stopPush(); return; }
@@ -489,9 +491,9 @@ export class PlayerGroundServices {
 
 // ------------------------------------------------------------------ AI gate activity
 // stands: [{ cx, cz, wx, wz, nx, nz, ty, lv, G (airliner geometry info), label }]; returns { static meshes added to group, update }
-export function buildGateServices(a, stands, opts) { return gseLowDetail(() => buildGateServices_(a, stands, opts)); }
+export function buildGateServices(a, stands, opts) { return gseLowDetail(() => withGSEAirport(a.icao, () => buildGateServices_(a, stands, opts))); }
 function buildGateServices_(a, stands, { group, gh, rnd, major }) {
-  const sv = new MB(); const live = []; const peopleSets = [];
+  const prof = gseProfile(a.icao); const sv = new MB(); const live = []; const peopleSets = [];
   const labels = stands.map((s) => s.label); const signs = gateSignAtlas(labels);
   const ground = (x, z) => gh(x, z) + 0.06;
   const onApron = (x, z) => a.aprons.some((ap) => pointInPoly(x, z, ap.p));
@@ -548,26 +550,41 @@ function buildGateServices_(a, stands, { group, gh, rnd, major }) {
     // ---- baggage: belt loader at the forward hold, tractor and carts alongside
     if (s.mode !== 'push' && (s.mode === 'cargo' || s.mode === 'remote' || rnd() < 0.6 * busy)) {
       const dp = P(0.25 * L, R); const hs = gearH - 0.85 * R;
-      const belt = GSE.belt(); setBelt(belt, hs); const ld = yaw(-Math.PI / 2 + 0.12); // facing the fuselage
+      const belt = GSE.belt(s.lv); setBelt(belt, hs); const ld = yaw(-Math.PI / 2 + 0.12); // facing the fuselage
       put(belt, [dp[0] - ld[0] * 4.05, dp[1] - ld[1] * 4.05], ld); sv.bake(belt);
-      const tr = put(GSE.bagtractor(), P(0.25 * L + 2.5, R + 9.5), f); sv.bake(tr);
+      const tr = put(GSE.bagtractor(s.lv), P(0.25 * L + 2.5, R + 9.5), f); sv.bake(tr);
       for (let c = 0; c < 3; c++) sv.bake(put(GSE.cart(c + s.cx), P(0.25 * L - 1.4 - c * 3.9, R + 9.5), f));
       crewHere.push({ kind: 'crew', loop: [P(0.25 * L - 2, R + 8.3), P(0.25 * L - 0.5, R + 4.6)], speed: 1.1 });
       crewHere.push({ kind: 'crew', stand: P(0.25 * L - 0.9, R + 3.3), face: [-rt[0], -rt[1]], work: true });
     }
     // ---- catering high-loader at R2 (raised to the door)
     if (s.mode === 'gate' && rnd() < 0.4 * busy) {
-      const dp = P(-0.3 * L, R); const dir = [-rt[0], -rt[1]]; const cat = GSE.catering();
+      const dp = P(-0.3 * L, R); const dir = [-rt[0], -rt[1]]; const cat = GSE.catering(s.lv);
       put(cat, [dp[0] + rt[0] * (5.9 + 0.25), dp[1] + rt[1] * (5.9 + 0.25)], dir); setLift(cat, sill); sv.bake(cat);
     }
-    // ---- Jet A truck ahead of the right wing with the hose to the underwing coupling
-    if ((s.mode === 'gate' || s.mode === 'remote') && rnd() < 0.45 * busy) {
+    // ---- fuel: hydrant dispenser on the pit (SFO / OAK / SJC are hydrant-fuelled) or a Jet A truck ahead of the right wing
+    if ((s.mode === 'gate' || s.mode === 'remote') && prof.hydrant && rnd() < 0.5 * busy) {
+      const z = 0.3 * T.span, le = 0.06 * L + L * (T.wide ? 0.17 : 0.19) * 0.5 - Math.tan(T.sweep * D2R) * z;
+      const tp = P(le + 4.7, z + 0.3); const hd = put(GSE.hydrant(), tp, f); sv.bake(hd); hd.updateMatrixWorld();
+      const pitP = P(le + 3.2, z + 3.1); const pit = put(GSE.pit(), pitP, f); sv.bake(pit);
+      const inl = hd.userData.inletAt.clone().applyMatrix4(hd.matrixWorld); const pt = V3(pitP[0], ground(pitP[0], pitP[1]) + 0.25, pitP[1]);
+      sv.bake(hoseMesh([inl, V3(inl.x, ground(inl.x, inl.z) + 0.08, inl.z), V3((inl.x + pt.x) / 2, ground(pt.x, pt.z) + 0.08, (inl.z + pt.z) / 2), pt], 0.06));
+      const deck = hd.userData.hoseAt.clone().applyMatrix4(hd.matrixWorld); const cp = P(le - 1.4, z); const c = V3(cp[0], g0 + gearH - 0.55 * R - 0.1, cp[1]);
+      sv.bake(hoseMesh(sagPoints(deck, c, 0.5, 8), 0.04));
+      crewHere.push({ kind: 'fuel', stand: P(le + 1.0, z + 1.8), face: [-f[0], -f[1]], work: true });
+    } else if ((s.mode === 'gate' || s.mode === 'remote') && !prof.hydrant && rnd() < 0.45 * busy) {
       const z = 0.3 * T.span, le = 0.06 * L + L * (T.wide ? 0.17 : 0.19) * 0.5 - Math.tan(T.sweep * D2R) * z;
       const tp = P(le + 7.4, z + 0.5); const truck = put(GSE.jet(), tp, f); sv.bake(truck);
       truck.updateMatrixWorld(); const reel = V3(2.85, 1.95, 1.3).applyMatrix4(truck.matrixWorld);
       const cp = P(le - 1.4, z); const c = V3(cp[0], g0 + gearH - 0.55 * R - 0.1, cp[1]);
       sv.bake(hoseMesh([reel, V3(reel.x, g0 + 0.1, reel.z), V3((reel.x + c.x) / 2, g0 + 0.1, (reel.z + c.z) / 2), V3(c.x, g0 + 0.15, c.z).lerp(V3(reel.x, g0, reel.z), 0.1), c], 0.05));
       crewHere.push({ kind: 'fuel', stand: P(le - 0.6, z - 1.2), face: rt, work: true });
+    }
+    // ---- potable water truck (TLD) at the aft service panel
+    if (major && s.mode === 'gate' && rnd() < 0.3 * busy) {
+      const wp = P(-0.36 * L, R + 3.6); const wt = put(GSE.water(), wp, [-f[0], -f[1]]); sv.bake(wt); wt.updateMatrixWorld();
+      const h0 = wt.userData.hoseAt.clone().applyMatrix4(wt.matrixWorld); const pp = P(-0.36 * L - 1.2, R * 0.6); const h1 = V3(pp[0], g0 + gearH - 0.6 * R, pp[1]);
+      sv.bake(hoseMesh(sagPoints(h0, h1, 0.4, 6), 0.03));
     }
     // ---- remote stand: air stairs at L1 + L2, apron bus with passengers walking to the stairs
     if (s.mode === 'remote') {
@@ -584,7 +601,7 @@ function buildGateServices_(a, stands, { group, gh, rnd, major }) {
     // ---- pushback stand: separate aircraft, animated bridge and tug
     if (s.mode === 'push') {
       const ac = buildAirliner(s.ty, s.lv); ac.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } }); group.add(ac);
-      const tug = GSE.tug(); setTowbar(tug, true); group.add(tug);
+      const tug = GSE.tug(s.lv); setTowbar(tug, true); group.add(tug);
       const st = { s, ac, tug, jb, D, Dstow, nOut, L, R, f, mode: 'docked', t: 20 + rnd() * 90, x: s.cx, z: s.cz, hdg: Math.atan2(f[0], -f[1]) / D2R, v: 0, dist: 0, turned: 0, sign: s.turnSign, g0, ground, tugDir: [f[0], f[1]], fade: 1 };
       live.push(st); placePush(st);
     }
@@ -628,6 +645,8 @@ function buildGateServices_(a, stands, { group, gh, rnd, major }) {
     },
   };
 }
+// FBO names as written in the panel (wordmarks on the trucks are upper case)
+function fboTitle(n) { if (/[a-z]/.test(n)) return n; return n.split(' ').map((w) => w === 'APP' ? w : w === 'OF' ? 'of' : w[0] + w.slice(1).toLowerCase()).join(' '); }
 function rng2(seed) { let s = seed >>> 0; return () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 
 // ---- AI pushback cycle: docked -> bridge retracts -> push with tail swing -> engine start -> taxi out -> (away) -> new arrival

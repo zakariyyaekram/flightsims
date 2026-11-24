@@ -5,7 +5,7 @@ import { heightAt, AIRPORTS, toLocal, fromLocal, pointInPoly, gateSpots } from '
 import { mulberry } from './noise.js';
 import { lightMaterial, makePoints, pbr, flattenStatic, pavementMaterial, canvasTex } from './world.js';
 import { airlinerGeometry, airlinerMaterials, airlinerRest } from './airliner.js';
-import { buildGateServices } from './groundservices.js';
+import { buildGateServices } from './groundservices.js?v=20261124b';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const D2R = Math.PI / 180;

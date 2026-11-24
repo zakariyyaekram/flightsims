@@ -23,8 +23,8 @@ import { Checklist } from './checklist.js?v=20261123g';
 import { Sound } from './audio.js';
 import { setAniso } from './textures.js';
 import { ATC } from './atc.js?v=20261123g';
-import { PlayerGroundServices } from './groundservices.js';
-import { tickGSE } from './gse.js';
+import { PlayerGroundServices } from './groundservices.js?v=20261124b';
+import { tickGSE } from './gse.js?v=20261124b';
 import { remap, buildControlsUI, changedCount, mouseSettings, mouseAxis } from './controls.js?v=20261123g';
 import { PerfMonitor } from './perf.js?v=20261123g';
 import { initCesium, syncCesiumCamera, getCesiumElevationWorld, warmCesiumTerrain, setCesiumQuality } from './cesium.js?v=20261123g';
@@ -492,6 +492,9 @@ const orbit = { yaw: 200, pitch: 12, dist: 14 };
 const walker = { pos: null, yaw: 0, pitch: 0 }; sim.walker = walker;
 const mouse = { x: 0, y: 0, yoke: false, nx: 0, ny: 0 };
 const ctrlState = { elev: 0, ail: 0, rud: 0 };
+// A movement key held while switching between walking and flying views must not leak into the throttle / walker.
+const suppressedKeys = new Set();
+const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyR', 'KeyF'];
 const views = ['cockpit', 'cabin', 'orbit', 'chase', 'tower', 'flyby', 'walk'];
 const viewNames = { cockpit: 'COCKPIT', cabin: 'CABIN — WALK (WASD)', orbit: 'EXTERNAL ORBIT', chase: 'CHASE', tower: 'TOWER', flyby: 'FLY-BY', walk: 'WALKAROUND (WASD)' };
 
@@ -561,6 +564,7 @@ window.addEventListener('keydown', (e) => {
   if (e.target && (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT')) return;
   sim.sound.start();
   const code = remap(e.code); if (code == null) return;
+  if (suppressedKeys.has(code)) { if (e.repeat) return; suppressedKeys.delete(code); }
   const k = e.key; const F = sim.fdm, S = F.sys, av = sim.av;
   sim.keys[code] = true; sim.keys.Shift = e.shiftKey;
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End', 'Space', 'Slash'].includes(code)) e.preventDefault();
@@ -598,8 +602,9 @@ window.addEventListener('keydown', (e) => {
     case 'KeyY': mouse.yoke = !mouse.yoke; $('yokeChip').classList.toggle('hidden', !mouse.yoke); $('cross').classList.toggle('hidden', !mouse.yoke); toast(mouse.yoke ? 'Mouse yoke ON — mouse position = yoke' : 'Mouse yoke OFF'); break;
     case 'KeyG': toggleATC(); break;
     case 'KeyU': $('strip').classList.toggle('hidden'); break;
-    case 'KeyC': setView(views[(views.indexOf(sim.view) + 1) % views.length]); break;
+    case 'KeyC': { let i = views.indexOf(sim.view); for (let n = 0; n < views.length; n++) { i = (i + 1) % views.length; if (setView(views[i], true)) break; } break; }
     case 'Digit1': case 'Digit2': case 'Digit3': case 'Digit4': case 'Digit5': case 'Digit6': case 'Digit7': setView(views[+code.slice(5) - 1]); break;
+    case 'Numpad1': case 'Numpad2': case 'Numpad3': case 'Numpad4': case 'Numpad5': case 'Numpad6': case 'Numpad7': setView(views[+code.slice(6) - 1]); break;
     case 'Digit8': $('tmapBtn').classList.toggle('on', toggleTaxiMap(undefined, sim)); break;
     case 'Digit9': sim.simRate = sim.simRate >= 4 ? 1 : sim.simRate * 2; toast('Sim rate ' + sim.simRate + '×'); break;
     case 'Space': look.yaw = 0; look.pitch = -10; camera.fov = 58; camera.updateProjectionMatrix(); break;
@@ -609,8 +614,8 @@ window.addEventListener('keydown', (e) => {
     case 'ArrowUp': case 'ArrowDown': if (sh) av.apButton(code === 'ArrowUp' ? 'UP' : 'DN', F); break;
   }
 });
-window.addEventListener('keyup', (e) => { const code = remap(e.code); if (code == null) return; sim.keys[code] = false; sim.keys.Shift = e.shiftKey; if (code === 'KeyI' && sim.fdm.sys.mags === 4) sim.startHeld = 0; });
-window.addEventListener('blur', () => { sim.keys = {}; });
+window.addEventListener('keyup', (e) => { const code = remap(e.code); if (code == null) return; suppressedKeys.delete(code); sim.keys[code] = false; sim.keys.Shift = e.shiftKey; if (code === 'KeyI' && sim.fdm.sys.mags === 4) sim.startHeld = 0; });
+window.addEventListener('blur', () => { sim.keys = {}; suppressedKeys.clear(); });
 
 const walkView = () => sim.view === 'cabin' || sim.view === 'walk';
 
@@ -622,19 +627,34 @@ function autoStart() {
   const chk = setInterval(() => { if (F.eng.running || sim.startHeld <= 0) { clearInterval(chk); S.mags = 3; sim.startHeld = 0; if (F.eng.running) { S.avionics = true; S.avionics2 = true; S.nav = true; F.ctrl.throttle = 0.13; toast('Engine running — avionics ON. Set altimeter (K), check oil pressure.', 3000); } } }, 100);
 }
 
-function setView(v) {
+const canWalkaround = () => { const F = sim.fdm; return !!F.onGround && !F.crashed && Math.hypot(F.vel[0], F.vel[2]) < 1; };
+// Ground height under (x, z) from the active ground model (Cesium terrain in Heavy mode, the local DEM otherwise).
+function groundH(x, z, y = 1e9) {
+  const g = sim.fdm.env.ground?.(x, z, y);
+  return Number.isFinite(g?.h) ? g.h : heightAt(x, z);
+}
+// Returns false (and keeps the current view) when the requested view can't be used right now.
+function setView(v, quiet = false) {
+  if (!views.includes(v)) return false;
+  if (v === 'walk' && !canWalkaround()) { if (!quiet) toast('Walkaround only on the ground, stopped'); return false; }
+  const walkish = (x) => x === 'walk' || x === 'cabin';
+  if (sim.view !== v && (walkish(sim.view) || walkish(v))) {
+    for (const code of MOVE_KEYS) { if (sim.keys[code]) suppressedKeys.add(code); sim.keys[code] = false; }
+  }
   sim.view = v; $('viewName').textContent = viewNames[v];
   if (v === 'walk') {
     const F = sim.fdm;
-    if (!(F.onGround && Math.hypot(F.vel[0], F.vel[2]) < 1)) { toast('Walkaround only on the ground, stopped'); sim.view = 'cockpit'; $('viewName').textContent = viewNames.cockpit; return; }
     const side = qrot(F.q, [0, 0, -1]), fw = qrot(F.q, [1, 0, 0]);
     walker.pos = new THREE.Vector3(F.pos[0] + side[0] * 4 + fw[0] * 1.5, 0, F.pos[2] + side[2] * 4 + fw[2] * 1.5);
+    walker.pos.y = groundH(walker.pos.x, walker.pos.z, F.pos[1] + 2) + 1.68;
     walker.yaw = Math.atan2(-(F.pos[0] - walker.pos.x), -(F.pos[2] - walker.pos.z)) / D2R; walker.pitch = -5;
   }
   if (v === 'cabin') { cabinEye.set(-0.35, 0.58, 0.0); look.yaw = 0; }
   if (v === 'flyby') flyby.pos = null;
+  if (v === 'chase') sim.chaseHdg = null;
   if (v !== 'tower' && v !== 'flyby') { camera.fov = v === 'cockpit' || v === 'cabin' ? 58 : 60; camera.updateProjectionMatrix(); }
   if (v === 'orbit') { orbit.yaw = 210; orbit.pitch = 10; orbit.dist = 13; }
+  return true;
 }
 const cabinEye = new THREE.Vector3(-0.35, 0.58, 0);
 const flyby = { pos: null };
@@ -814,6 +834,21 @@ const tmpQ = new THREE.Quaternion(), tmpQ2 = new THREE.Quaternion(), tmpV = new 
 const acQ = new THREE.Quaternion();
 const EYE = new THREE.Vector3(-0.08, 0.6, -0.27);
 let headOff = new THREE.Vector3();
+// Tower cab eye point. airport3d stores a THREE.Vector3 once the airport is built; before that (or after it is
+// streamed out) geo.js only has a plain {x, z, h} record, so build the eye point from the ground height.
+const towerCache = new WeakMap();
+function towerEye(a) {
+  const tp = a.towerPos;
+  if (tp && typeof tp.distanceToSquared === 'function') return tp;
+  const x = tp?.x ?? a.towerInfo?.x ?? a.ramp?.x, z = tp?.z ?? a.towerInfo?.z ?? a.ramp?.z;
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
+  const h = tp?.h ?? a.towerInfo?.h ?? 12;
+  let c = towerCache.get(a);
+  const now = performance.now();
+  // re-sample now and then: Heavy mode's Cesium elevation arrives after start-up
+  if (!c || c.x !== x || c.z !== z || now - c.t > 5000) { c = new THREE.Vector3(x, groundH(x, z) + Math.max(6, h - 2), z); c.t = now; towerCache.set(a, c); }
+  return c;
+}
 function updateCamera(dt, t) {
   const F = sim.fdm;
   acQ.set(F.q[0], F.q[1], F.q[2], F.q[3]);
@@ -858,12 +893,13 @@ function updateCamera(dt, t) {
     } else {
       camera.position.set(acPos.x + Math.cos(yaw) * Math.cos(pit) * d, acPos.y + Math.sin(pit) * d, acPos.z + Math.sin(yaw) * Math.cos(pit) * d);
     }
-    const gh = heightAt(camera.position.x, camera.position.z) + 0.6; if (camera.position.y < gh) camera.position.y = gh;
+    const gh = groundH(camera.position.x, camera.position.z) + 0.6; if (camera.position.y < gh) camera.position.y = gh;
     camera.up.set(0, 1, 0); camera.lookAt(acPos.x, acPos.y + 0.4, acPos.z);
   } else if (v === 'tower') {
     camera.near = 0.5;
     let best = null, bd = 1e12;
-    for (const a of AIRPORTS) { const tp = a.towerPos || new THREE.Vector3(a.towerInfo ? a.towerInfo.x : a.ramp.x, (a.towerInfo ? a.towerInfo.h : 12) + heightAt(a.ramp.x, a.ramp.z), a.towerInfo ? a.towerInfo.z : a.ramp.z); const d = tp.distanceToSquared(acPos); if (d < bd) { bd = d; best = tp; } }
+    for (const a of AIRPORTS) { const tp = towerEye(a); if (!tp) continue; const d = tp.distanceToSquared(acPos); if (d < bd) { bd = d; best = tp; } }
+    if (!best) best = tmpV.set(acPos.x + 60, groundH(acPos.x + 60, acPos.z + 60) + 15, acPos.z + 60);
     camera.position.copy(best); camera.up.set(0, 1, 0); camera.lookAt(acPos);
     const dist = Math.sqrt(bd); camera.fov = clamp(2 * Math.atan(30 / dist) / D2R, 2, 60);
   } else if (v === 'flyby') {
@@ -872,17 +908,18 @@ function updateCamera(dt, t) {
     if (!flyby.pos || flyby.pos.distanceTo(acPos) > 700 || (vel.length() > 3 && tmpV.copy(flyby.pos).sub(acPos).dot(vel) < -vel.length() * 40)) {
       const ahead = vel.length() > 5 ? vel.clone().normalize().multiplyScalar(Math.max(150, vel.length() * 6)) : new THREE.Vector3(30, 0, 0);
       const side = new THREE.Vector3(-ahead.z, 0, ahead.x).normalize().multiplyScalar(22);
-      flyby.pos = acPos.clone().add(ahead).add(side); flyby.pos.y = Math.max(flyby.pos.y + 4, heightAt(flyby.pos.x, flyby.pos.z) + 1.7);
+      flyby.pos = acPos.clone().add(ahead).add(side); flyby.pos.y = Math.max(flyby.pos.y + 4, groundH(flyby.pos.x, flyby.pos.z) + 1.7);
     }
     camera.position.copy(flyby.pos); camera.up.set(0, 1, 0); camera.lookAt(acPos);
     camera.fov = clamp(2 * Math.atan(14 / Math.max(1, flyby.pos.distanceTo(acPos))) / D2R, 8, 70);
   } else if (v === 'walk') {
+    if (!walker.pos) { setView('cockpit', true); return updateCamera(dt, t); }
     camera.near = 0.05;
-    const K = sim.keys; const sp = (K.ShiftLeft ? 4 : 1.6) * dt; const yaw = walker.yaw * D2R;
+    const K = sim.keys; const sp = (K.ShiftLeft || K.ShiftRight ? 4 : 1.6) * dt; const yaw = walker.yaw * D2R;
     const fw = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)), rt = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
     if (K.KeyW) walker.pos.addScaledVector(fw, sp); if (K.KeyS) walker.pos.addScaledVector(fw, -sp);
     if (K.KeyD) walker.pos.addScaledVector(rt, sp); if (K.KeyA) walker.pos.addScaledVector(rt, -sp);
-    walker.pos.y = heightAt(walker.pos.x, walker.pos.z) + 1.68 + Math.sin(t * 9) * 0.01 * ((K.KeyW || K.KeyS) ? 1 : 0);
+    walker.pos.y = groundH(walker.pos.x, walker.pos.z, F.pos[1] + 2) + 1.68 + Math.sin(t * 9) * 0.01 * ((K.KeyW || K.KeyS) ? 1 : 0);
     camera.position.copy(walker.pos);
     camera.quaternion.setFromEuler(new THREE.Euler(walker.pitch * D2R, walker.yaw * D2R, 0, 'YXZ'));
   }
