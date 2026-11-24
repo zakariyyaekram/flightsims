@@ -244,3 +244,22 @@ kbd { font: 500 12px var(--mono); border: 1px solid var(--line); border-radius: 
 .aircraftButton strong { font-size: 16px; }
 .linkButton { background: none; border: 0; padding: 0; color: #8edaff; text-decoration: underline; cursor: pointer; font: inherit; min-height: 0; }
 @media (max-width: 760px) { .aircraftActions { grid-template-columns: 1fr; } }
+
+/* step 3 / settings: flight plan & start state */
+.fpPanel { margin-top: 16px; }
+.fpPanel.mounted { margin: 0 0 18px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.fpTitle { margin: 0 0 12px; font: 700 16px var(--cond); letter-spacing: .1em; text-transform: uppercase; color: var(--accent); }
+#flightStep .fpTitle { display: none; }
+.fpGrid label:first-child { grid-column: auto; }
+.fpGrid input[type="text"] { width: 100%; box-sizing: border-box; font: 500 14px var(--font); color: var(--text); background: rgba(0,0,0,0.35); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; text-transform: uppercase; }
+.fpGrid input[type="text"]::placeholder { text-transform: none; color: var(--muted); }
+.fpLabel { margin: 16px 0 0; color: var(--muted); font-size: 13px; letter-spacing: .04em; }
+.fpStates { grid-template-columns: repeat(5, minmax(0, 1fr)); margin-top: 8px; gap: 10px; }
+.fpState { min-height: 76px; padding: 10px 12px; }
+.fpState strong { font-size: 15px; }
+.fpState.selected { border-color: #8edaff; background: rgba(142, 218, 255, .16); box-shadow: inset 0 0 0 1px #8edaff; }
+.fpAirRow { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; max-width: 360px; }
+.fpSummary { margin: 12px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.fpActions { margin-top: 16px; }
+@media (max-width: 900px) { .fpStates { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .fpStates { grid-template-columns: 1fr 1fr; } }

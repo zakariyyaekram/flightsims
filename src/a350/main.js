@@ -10,14 +10,15 @@ import { buildAircraft } from '../aircraft.js?v=20261123g';
 import { Environment } from '../env.js';
 import { buildAirports, RockField, Forest, GrassField } from '../world.js';
 import { Scenery } from '../scenery.js?v=20261123g';
-import { Traffic } from '../traffic.js?v=20261124d';
-import { Tower } from '../tower.js?v=20261124d';
+import { Traffic } from '../traffic.js?v=20261124e';
+import { Tower } from '../tower.js?v=20261124e';
 import { buildLife } from '../life.js?v=20261123g';
 import { MovingMap } from '../map.js?v=20261123g';
-import { departureRoute, routeProgress } from '../taxi.js?v=20261124d';
-import { toggleTaxiMap, updateTaxiMap, taxiMapOpen, taxiChart } from '../taximap.js?v=20261124d';
+import { departureRoute, routeProgress } from '../taxi.js?v=20261124e';
+import { toggleTaxiMap, updateTaxiMap, taxiMapOpen, taxiChart } from '../taximap.js?v=20261124e';
 import { setAniso } from '../textures.js';
-import { ATC } from '../atc.js?v=20261124d';
+import { ATC } from '../atc.js?v=20261124e';
+import { resolveFlight, enRoutePoint } from '../flightplan.js?v=20261124e';
 import { tickGSE, GSE } from '../gse.js';
 import { remap, buildControlsUI, changedCount, mouseSettings, mouseAxis } from '../controls.js?v=20261123g';
 import { PerfMonitor } from '../perf.js?v=20261123g';
@@ -235,7 +236,7 @@ window.chooseLoadMode = chooseLoadMode; window.startEdition = chooseLoadMode;
 // ---------------- setup / spawn ----------------
 function readSetup() {
   return {
-    spawn: $('spawn').value, dest: $('dest').value, crzFL: +$('crzfl').value, tod: +$('tod').value, windDir: +$('wdir').value, windKt: +$('wspd').value, turb: +$('turb').value,
+    fp: window.FlightSetup?.get() || null, tod: +$('tod').value, windDir: +$('wdir').value, windKt: +$('wspd').value, turb: +$('turb').value,
     cover: +$('clouds').value, baseFt: +$('cbase').value, visKm: +$('vis').value, qnh: +$('qnh').value, isa: +$('isa').value, fuelT: +$('fuel').value, paxT: +$('payload').value,
     quality: $('quality').value, autoRes: $('autoRes').checked, roadTraffic: $('roadTraffic').value, atcEnabled: $('atcEnabled').checked, aiTraffic: $('aiTraffic').checked,
   };
@@ -244,18 +245,13 @@ function bindOutputs() {
   const fmtT = (v) => { const h = Math.floor(v), m = Math.round((v - h) * 60); return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`; };
   const map = [['tod', 'todOut', fmtT], ['wdir', 'wdOut', (v) => String(v).padStart(3, '0') + '°'], ['wspd', 'wsOut', (v) => v + ' kt'],
     ['turb', 'tbOut', (v) => (v < 0.05 ? 'None' : v < 0.3 ? 'Light' : v < 0.6 ? 'Moderate' : 'Severe')], ['cbase', 'cbOut', (v) => (+v).toLocaleString() + ' ft'],
-    ['vis', 'visOut', (v) => v + ' km'], ['qnh', 'qnhOut', (v) => v + ' hPa'], ['isa', 'isaOut', (v) => (v >= 0 ? '+' : '') + v + ' °C'], ['fuel', 'fuelOut', (v) => v + ' t'], ['payload', 'payloadOut', (v) => v + ' t'], ['crzfl', 'crzOut', (v) => 'FL' + String(v).padStart(3, '0')]];
+    ['vis', 'visOut', (v) => v + ' km'], ['qnh', 'qnhOut', (v) => v + ' hPa'], ['isa', 'isaOut', (v) => (v >= 0 ? '+' : '') + v + ' °C'], ['fuel', 'fuelOut', (v) => v + ' t'], ['payload', 'payloadOut', (v) => v + ' t']];
   for (const [i, o, fn] of map) { const el = $(i), out = $(o); if (!el || !out) continue; const up = () => (out.textContent = fn(+el.value)); el.addEventListener('input', up); up(); }
 }
 bindOutputs();
 const airport = (icao) => AIRPORTS.find((a) => a.icao === icao);
-const DESTS = { KSJC: ['KSJC', '30L'], KOAK: ['KOAK', '30'], KSFO: ['KSFO', '28L'] };
-const SPAWNS = {
-  SFOgate: { icao: 'KSFO', rwy: '28L', gate: true, cold: true }, SFOgateWarm: { icao: 'KSFO', rwy: '28L', gate: true, cold: false },
-  OAKgate: { icao: 'KOAK', rwy: '30', gate: true, cold: true },
-  SFO28L: { icao: 'KSFO', rwy: '28L' }, SFO1R: { icao: 'KSFO', rwy: '1R' }, SJC30L: { icao: 'KSJC', rwy: '30L' }, OAK30: { icao: 'KOAK', rwy: '30' },
-  ILS28L: { air: 'ils', icao: 'KSFO', rwy: '28L' }, ILS30L: { air: 'ils', icao: 'KSJC', rwy: '30L' }, cruise: { air: 'cruise', icao: 'KSFO', rwy: '28L' },
-};
+const MIN_RWY = 7000 * 0.3048; // m
+const flightOf = (s) => resolveFlight(s.fp || { dep: 'KSFO', dest: 'KSJC', crzFt: 12000, state: 'cold' }, { windDir: s.windDir, windKt: s.windKt }, MIN_RWY);
 // pick a terminal stand deep enough for a 74 m aircraft and reserve it (and its neighbours) so no AI airliner parks there
 function gateFor(icao) {
   const a = airport(icao); if (!a) return null; if (a._a350Gate) return a._a350Gate;
@@ -268,12 +264,16 @@ function gateFor(icao) {
   a._reservedSpots = new Set([best.i - 1, best.i, best.i + 1]);
   a._a350Gate = best; return best;
 }
-function reserveGate(s) { const sp = SPAWNS[s.spawn]; if (sp?.gate) gateFor(sp.icao); }
+function reserveGate(s) { const R = flightOf(s); if (R.stage === 'ramp' || R.stage === 'taxi') gateFor(R.dep); return R; }
 
 let lastSetup = null;
 function applySetup(s, warmOnly = false) {
   lastSetup = s;
-  const F = fdm; const sp = SPAWNS[s.spawn] || SPAWNS.SFO28L;
+  const F = fdm; const R = flightOf(s), stage = R.stage;
+  // what the old spawn table described, now derived from the step-3 start state
+  const sp = { icao: R.dep, rwy: R.depRwy, gate: stage === 'ramp', cold: R.state === 'cold', running: R.state === 'running', taxi: stage === 'taxi',
+    air: stage === 'final' ? 'ils' : stage === 'climb' || stage === 'cruise' ? stage : null };
+  sim.flight = R; s.flight = R;
   sim.atc.enabled = s.atcEnabled !== false; sim.aiTrafficEnabled = s.aiTraffic !== false; sim.atc.trafficEnabled = sim.aiTrafficEnabled;
   if (life) life.setTrafficEnabled?.(sim.aiTrafficEnabled); if (traffic) traffic.setEnabled(sim.aiTrafficEnabled);
   sim.weather = { windDir: s.windDir, windKt: s.windKt, turb: s.turb, cover: s.cover, baseFt: s.baseFt, visKm: s.visKm, qnhHpa: s.qnh, isa: s.isa };
@@ -287,30 +287,47 @@ function applySetup(s, warmOnly = false) {
   F.env.qnh = s.qnh * HPA; F.env.isaDev = s.isa; F.env.turbulence = s.turb;
   const wr = s.windDir * D2R, ws = s.windKt * KT; sim.windVec = [-Math.sin(wr) * ws, 0, Math.cos(wr) * ws]; F.env.wind = sim.windVec.slice();
   env.setWeather({ cover: s.cover, base: s.baseFt * FT, visKm: s.visKm, windDir: s.windDir, windKt: s.windKt });
-  // flight plan
-  const [dI, dR] = DESTS[s.dest] || DESTS.KSJC;
-  const destI = dI === sp.icao ? (sp.icao === 'KSJC' ? 'KSFO' : 'KSJC') : dI; const destR = DESTS[destI][1];
+  // flight plan (the FMS F-PLN: departure fix, pilot route or automatic VORs, approach)
   fms.reset();
+  fms.build({ origin: R.dep, originRwy: R.depRwy, dest: R.dest, destRwy: R.arrRwy, crzFL: Math.round(R.crzFt / 100), via: R.wpts });
   // spawn
-  let pos, hdg, onGround = true, speed = 0, alt = 0, cold = !!sp.cold, conf = 0, gearDown = true;
+  let pos, hdg, onGround = true, speed = 0, alt = 0, cold = sp.cold, conf = 0, gearDown = true;
   sim.taxi = null; cancelServices(true);
-  if (sp.gate) {
-    const g = gateFor(sp.icao) || { wx: airport(sp.icao).ramp.x, wz: airport(sp.icao).ramp.z, nx: 0, nz: 1 };
+  if (sp.gate || sp.taxi) {
+    const g = gateFor(R.dep) || { wx: R.depA.ramp.x, wz: R.depA.ramp.z, nx: 0, nz: 1 };
     const d = 7 + (XNOSE); pos = { x: g.wx + g.nx * d, z: g.wz + g.nz * d };
     hdg = (Math.atan2(-g.nx, g.nz) / D2R + 360) % 360; // nose toward the terminal (forward = -n)
-    fms.build({ origin: sp.icao, originRwy: sp.rwy, dest: destI, destRwy: destR, crzFL: s.crzFL });
-    const route = departureRoute(sp.icao, sp.rwy, pos.x - g.nx * 0, pos.z);
-    if (route) sim.taxi = { route, show: true, icao: sp.icao };
-  } else if (sp.air === 'ils') {
-    fms.build({ origin: sp.icao === 'KSFO' ? 'KSJC' : 'KSFO', originRwy: sp.icao === 'KSFO' ? '30L' : '28L', dest: sp.icao, destRwy: sp.rwy, crzFL: s.crzFL });
-    const e = fms.dest.end; const c = e.hdg * D2R; const d = 11 * NM;
-    pos = { x: e.x - Math.sin(c) * d, z: e.z + Math.cos(c) * d }; hdg = e.hdg; onGround = false; speed = 175; alt = 3000 * FT + (s.qnh - 1013) * 27 * FT; conf = 4;
-  } else if (sp.air === 'cruise') {
-    fms.build({ origin: 'KSFO', originRwy: '28L', dest: destI === 'KSFO' ? 'KSJC' : destI, destRwy: DESTS[destI === 'KSFO' ? 'KSJC' : destI][1], crzFL: s.crzFL });
-    pos = ll2w(37.86, -122.25); hdg = 160; onGround = false; speed = 280; alt = 10000 * FT; gearDown = false;
+    let route = departureRoute(R.dep, R.depRwy, pos.x, pos.z);
+    if (sp.taxi && route) {
+      // already pushed back: on the taxi route clear of the stand, nose along the route
+      const pts = route.pts; let k = pts.findIndex((p) => Math.hypot(p.x - pos.x, p.z - pos.z) > 110);
+      if (k < 0) k = Math.max(0, pts.length - 2); const p = pts[k], n = pts[Math.min(pts.length - 1, k + 1)];
+      const nn = n === p ? pts[k] : n;
+      pos = { x: p.x, z: p.z }; if (nn !== p) hdg = (Math.atan2(nn.x - p.x, -(nn.z - p.z)) / D2R + 360) % 360;
+      route = departureRoute(R.dep, R.depRwy, pos.x, pos.z) || route;
+      conf = 2;
+    }
+    if (route) sim.taxi = { route, show: true, icao: R.dep };
+    s.depRwy = route ? route.rwy : R.depRwy; s.taxiVia = route ? route.viaText : null;
+  } else if (stage === 'final') {
+    const e = fms.dest.end; const c = e.hdg * D2R; let d = (R.arrILS ? 11 : 7) * NM;
+    // shorter final when the full one would start outside the scenery (e.g. SJC 30L from the south-east)
+    while (d > 5 * NM && !inWorld(e.x - Math.sin(c) * d, e.z + Math.cos(c) * d, 4000)) d -= NM;
+    pos = { x: e.x - Math.sin(c) * d, z: e.z + Math.cos(c) * d }; hdg = e.hdg; onGround = false; speed = 175; conf = 4;
+    alt = R.arrILS ? 3000 * FT + e.elev + (s.qnh - 1013) * 27 * FT : e.elev + Math.tan(3 * D2R) * d + 15;
+  } else if (stage === 'climb') {
+    // climbing out on runway heading, 4 nm past the departure end, clean
+    const e = fms.origin.end, c = e.hdg * D2R, L = R.depRunway.len + 4 * NM;
+    pos = { x: e.x + Math.sin(c) * L, z: e.z - Math.cos(c) * L }; hdg = e.hdg; onGround = false; speed = 230; alt = e.elev + 3000 * FT; gearDown = false;
+  } else if (stage === 'cruise') {
+    const p = enRoutePoint(R); pos = { x: p.x, z: p.z }; hdg = p.hdg; onGround = false; gearDown = false;
+    alt = Math.max(R.crzFt * FT, heightAt(p.x, p.z) + 2000 * FT); speed = alt > 28000 * FT ? 260 : 280; R.leg = p.leg;
+    // continue the F-PLN from the waypoint the aircraft is flying toward
+    const pts = [R.dep, ...R.wpts.map((w) => w.ident), R.dest], to = pts[p.leg];
+    let i = to === R.dest ? fms.legs.findIndex((l) => l.appr) : fms.legs.findIndex((l, j) => j > 1 && l.ident === to);
+    if (i < 1) i = fms.legs.findIndex((l) => l.appr); if (i > 0) fms.act = i;
   } else {
-    fms.build({ origin: sp.icao, originRwy: sp.rwy, dest: destI, destRwy: destR, crzFL: s.crzFL });
-    const f0 = findRunway(sp.icao, sp.rwy); const e = runwayEnd(f0.r, f0.e); const k = (f0.r.disp?.[f0.e] || 0) + 45;
+    const f0 = findRunway(R.dep, R.depRwy); const e = runwayEnd(f0.r, f0.e); const k = (f0.r.disp?.[f0.e] || 0) + 45;
     pos = { x: e.x + e.dir[0] * k, z: e.z + e.dir[1] * k }; hdg = e.hdg; conf = 2;
   }
   // masses: fuel split wing tanks first, payload
@@ -320,36 +337,42 @@ function applySetup(s, warmOnly = false) {
   const cfg = CONFS[conf];
   const localGh = heightAt(pos.x, pos.z); const cgh = getCesiumElevationWorld(pos.x, pos.z); const gh = Number.isFinite(cgh) ? cgh : localGh;
   warmCesiumTerrain(pos.x, pos.z);
-  F.reset({ pos: [pos.x, onGround ? gh + A350.cgHeight : alt, pos.z], hdg, onGround, running: !cold && !(sp.gate), speedKt: speed, gearDown, slat: cfg.slat, flap: cfg.flap });
+  F.reset({ pos: [pos.x, onGround ? gh + A350.cgHeight : alt, pos.z], hdg, onGround, running: !cold && (!sp.gate || sp.running), speedKt: speed, gearDown, slat: cfg.slat, flap: cfg.flap });
   if (onGround) F.settleOnGround?.();
-  S.reset(cold, { gpu: !!sp.gate });
+  S.reset(cold, { gpu: sp.gate && !sp.running });
   if (!cold) for (const k of ['CO', 'CI', 'CU', 'CL', 'FI', 'FO', 'ISIS']) S.du[k] = { t: 30 }; // displays already booted
-  if (sp.gate && !cold) { S.master = [false, false]; S.press('EXT1', true); S.press('EXT2', true); S.press('APUGEN', true); }
+  if (sp.gate && !cold && !sp.running) { S.master = [false, false]; S.press('EXT1', true); S.press('EXT2', true); S.press('APUGEN', true); }
   afs.reset({ hdg: Math.round(hdg), alt: onGround ? 5000 : Math.round(alt / FT / 100) * 100 });
   F.cfgTarget = { slat: cfg.slat, flap: cfg.flap }; sim.flapConf = conf; sim.flapLever = [0, 1, 1, 2, 3, 4][conf];
   F.gear.lever = gearDown ? 1 : 0; F.ctrl.gearLever = F.gear.lever;
   F.ctrl.tla = [0, 0]; F.ctrl.spdbrk = 0; F.ctrl.spdArm = false; F.ctrl.parkBrake = onGround; F.ctrl.rudTrim = 0;
   F.baroRef = cold ? 1013 : s.qnh;
-  for (const e of sim.efis) { e.baro = s.qnh; e.std = false; e.mode = 'ARC'; e.range = sp.air ? 20 : 10; e.ls = sp.air === 'ils'; }
+  for (const e of sim.efis) { e.baro = s.qnh; e.std = stage === 'cruise' && R.crzFt >= 18000; e.mode = sp.air === 'cruise' ? 'NAV' : 'ARC'; e.range = sp.air ? (stage === 'cruise' ? 40 : 20) : 10; e.ls = sp.air === 'ils' && R.arrILS; }
   sim.kccu.focus = null; sim.kccu.buf = ''; sim.mfdInit = null;
   if (onGround) {
     fms.perf.conf = 1; F.abrk.mode = 'RTO';
     if (!cold) { fms.computeTO(F, fms.perf.conf, false); if (!sp.gate) { afs.athr.armed = true; F.ctrl.parkBrake = true; } }
+    if (sp.taxi) { S.ov.NOSE = 1; S.ov.BEACON = 1; S.ov.NAV = 1; }
+    if (stage === 'runway') { S.ov.NOSE = 2; S.ov.LAND = 1; S.ov.STROBE = 2; S.ov.BEACON = 1; S.ov.NAV = 1; }
   }
   if (sp.air === 'ils') {
     F.ctrl.tla = [DETENT.CLB, DETENT.CLB]; F.ctrl.parkBrake = false; F.E.forEach((e) => (e.P = 0.45)); F.trimAir(-1);
     fms.phase = 'APPROACH'; fms.appr.conf = 5; fms.appr.qnh = s.qnh; fms.computeLDG(F, 5);
     afs.airT = 30; afs.fcu.alt = 3000; afs.athr.armed = true; afs.athr.active = true;
-    afs.fcu.spdManaged = true; afs.hdgPull(); afs.apPb(0); afs.apprPb(); afs.apPb(1);
+    afs.fcu.spdManaged = true; afs.hdgPull(); afs.apPb(0); if (R.arrILS) { afs.apprPb(); afs.apPb(1); }
     F.ctrl.spdArm = true; F.abrk.mode = 'LO';
-  } else if (sp.air === 'cruise') {
-    F.ctrl.tla = [DETENT.CLB, DETENT.CLB]; F.ctrl.parkBrake = false; F.E.forEach((e) => (e.P = 0.6)); F.trimAir(0);
-    fms.phase = 'CRUISE'; afs.airT = 300; afs.fcu.alt = 10000; afs.athr.armed = true; afs.athr.active = true; afs.fcu.spdManaged = false; afs.fcu.spd = 280; afs.fcu.hdgManaged = false;
-    afs.hdgPull(); afs.altPush(); afs.apPb(0);
+  } else if (sp.air) {
+    // climb / cruise: AP1, A/THR, managed NAV along the F-PLN, FCU altitude = cruise level
+    F.ctrl.tla = [DETENT.CLB, DETENT.CLB]; F.ctrl.parkBrake = false; F.E.forEach((e) => (e.P = sp.air === 'climb' ? 0.8 : 0.6)); F.trimAir(0);
+    fms.phase = sp.air === 'climb' ? 'CLIMB' : 'CRUISE'; afs.airT = 300;
+    afs.fcu.alt = Math.round(R.crzFt / 100) * 100; afs.athr.armed = true; afs.athr.active = true; afs.fcu.spdManaged = false; afs.fcu.spd = sp.air === 'climb' ? 250 : Math.round(speed);
+    afs.hdgPull(); afs.apPb(0); afs.hdgPush?.(); if (sp.air === 'climb') afs.altPush?.(); else afs.altPush();
+    for (const k of ['NAV', 'BEACON']) S.ov[k] = 1; S.ov.STROBE = 2;
   }
+  if (sp.air) { S.ov.NAV = 1; S.ov.BEACON = 1; S.ov.STROBE = 2; if (sp.air !== 'cruise') S.ov.LAND = 1; }
   F.ind.ias = speed;
   // ATC (shared module) — call sign from the FMS flight number
-  sim.atc.reset({ spawn: sp.icao === 'KSFO' ? 'SFO28' : sp.icao === 'KOAK' ? 'OAK30' : 'SJC30' });
+  sim.atc.reset({ callsign: 'Airbus ' + fms.flightNo.replace(/\D/g, ''), flight: R, depRwy: s.depRwy || R.depRwy, taxiVia: s.taxiVia, aiTraffic: s.aiTraffic });
   sim.atc.callsign = 'Airbus ' + fms.flightNo.replace(/\D/g, '');
   if (sim.tower) sim.tower.q.clear();
   sim.rmp[0].active.VHF1 = sim.atc.frequency;
@@ -826,14 +849,24 @@ function togglePause(force) { sim.paused = force ?? !sim.paused; $('pauseChip').
 $('perfChip')?.addEventListener('click', () => $('fps').classList.toggle('hidden'));
 $('fly').onclick = () => {
   sim.sound.start();
-  const s = readSetup(); reserveGate(s);
-  const sp = SPAWNS[s.spawn]; if (sp?.gate && airports?.loaded?.has(sp.icao) && !airport(sp.icao)._builtReserved) { airport(sp.icao)._builtReserved = true; airports.rebuild(sp.icao); }
+  const s = readSetup(); const R = reserveGate(s);
+  const ramp = R.stage === 'ramp' || R.stage === 'taxi';
+  if (ramp && airports?.loaded?.has(R.dep) && !airport(R.dep)._builtReserved) { airport(R.dep)._builtReserved = true; airports.rebuild(R.dep); }
   applySetup(s);
   showMenu(false); $('hud').classList.remove('hidden'); $('crash').classList.add('hidden');
   sim.started = true; togglePause(false); setView(sim.view === 'walk' ? 'cockpit' : sim.view);
-  const msg = sp?.gate ? (sp.cold ? `Parked at the gate, cold & dark. Overhead: BAT 1/2, EXT 1/2 — or Shift+E for auto-start. J = ground services, ? = help.` : 'Parked at the gate with ground power. Shift+E starts the engines. J = ground services.') : sp?.air === 'ils' ? 'Established inbound, AP1+2 with APPR armed — autoland, or press Q to hand-fly.' : sp?.air ? 'Cruising with AP1 on. Shift+arrows set FCU HDG / ALT.' : 'Lined up, engines running, CONF 1+F. Release the brake (P), thrust to FLX (Shift+W twice), rotate at VR.';
+  const rt = `${R.dep} ${R.depRwy} → ${R.dest} ${R.arrRwy}`;
+  const msg = {
+    cold: `${rt}. Parked at the gate, cold & dark. Overhead: BAT 1/2, EXT 1/2 — or Shift+E for auto-start. J = ground services, ? = help.`,
+    running: `${rt}. At the gate with both engines running. J = pushback, then Shift+G to call Ground for taxi.`,
+    taxi: `${rt}. Pushed back, CONF 1+F, taxi clearance received — read it back (Shift+G), release the brake (P) and follow the taxi line (T).`,
+    runway: `${rt}. Lined up, engines running, CONF 1+F. Release the brake (P), thrust to FLX (Shift+W twice), rotate at VR.`,
+    climb: `${rt}. Climbing out with AP1 and managed NAV to ${'FL' + String(Math.round(R.crzFt / 100)).padStart(3, '0')}. Shift+G for Departure.`,
+    cruise: `${rt}. En route at ${R.crzFt >= 18000 ? 'FL' + Math.round(R.crzFt / 100) : R.crzFt + ' ft'}, AP1 on, managed NAV along the F-PLN.`,
+    final: R.arrILS ? `${rt}. Established inbound, AP1+2 with APPR armed — autoland, or press Q to hand-fly.` : `${rt}. On a visual final, CONF FULL — hand-fly or use the FCU.`,
+  }[R.state === 'running' ? 'running' : R.stage === 'ramp' ? 'cold' : R.stage];
   toast(msg, 8000); canvas.focus?.();
-  if (sp?.gate) { sim.groundSvc.gpu = true; sim.groundSvc.stairs = sp.cold; S.doors.L1 = sp.cold; }
+  if (R.stage === 'ramp' && R.state === 'cold') { sim.groundSvc.gpu = true; sim.groundSvc.stairs = true; S.doors.L1 = true; }
 };
 $('showHelp').onclick = () => setHelp(true);
 $('helpClose').onclick = () => setHelp(false);

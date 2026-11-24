@@ -42,7 +42,7 @@ export class FMS {
   rwyEnd(icao, rwy) { const f = findRunway(icao, rwy); if (!f) return null; const e = runwayEnd(f.r, f.e); return { ...e, len: f.r.len, a: f.a, r: f.r, idx: f.e }; }
 
   // Build a complete flight plan (origin runway -> destination runway ILS approach + missed approach)
-  build({ origin, originRwy, dest, destRwy, crzFL, flightNo }) {
+  build({ origin, originRwy, dest, destRwy, crzFL, flightNo, via }) {
     if (flightNo) this.flightNo = flightNo;
     if (crzFL) this.crzFL = crzFL;
     const o = this.rwyEnd(origin, originRwy), d = this.rwyEnd(dest, destRwy);
@@ -70,9 +70,13 @@ export class FMS {
       cand.push({ t, n });
     }
     cand.sort((a, b) => a.t - b.t);
-    for (const c of cand.slice(0, 2)) legs.push({ ident: c.n.ident, x: c.n.x, z: c.n.z, kind: 'VOR', freq: c.n.freq });
-    // if the intermediate fix is behind the departure (e.g. SFO 28R -> SFO 28L), add a downwind-ish point
-    const ang = Math.abs(angDiff(brg(p0.x, p0.z, ifx.x, ifx.z), d.hdg));
+    // a pilot-entered route (step-3 flight plan) replaces the automatic VOR pick
+    const viaPts = (via || []).map((w) => (w && w.x != null ? w : this.db.find((n) => n.ident === w))).filter(Boolean);
+    if (viaPts.length) for (const n of viaPts) legs.push({ ident: n.ident, x: n.x, z: n.z, kind: n.type === 'VOR' ? 'VOR' : 'FIX', freq: n.freq });
+    else for (const c of cand.slice(0, 2)) legs.push({ ident: c.n.ident, x: c.n.x, z: c.n.z, kind: 'VOR', freq: c.n.freq });
+    // if the intermediate fix is behind the last en-route point (e.g. SFO 28R -> SFO 28L), add a downwind-ish point
+    const pl = legs[legs.length - 1];
+    const ang = Math.abs(angDiff(brg(pl.x, pl.z, ifx.x, ifx.z), d.hdg));
     if (ang > 100) {
       const side = 1; const dw = { x: ifx.x + Math.cos(dh) * 6 * NM * side, z: ifx.z + Math.sin(dh) * 6 * NM * side };
       const fwd = { x: dw.x - Math.sin(dh) * 4 * NM, z: dw.z + Math.cos(dh) * 4 * NM };
