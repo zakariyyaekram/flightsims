@@ -1,19 +1,22 @@
 // Real airports: every runway with FAA-pattern markings and lighting, OSM taxiways / aprons / buildings,
 // control towers at their real positions and heights, windsocks, parked airliners at terminal gates and GA aircraft on ramps.
 import * as THREE from 'three';
-import { heightAt, AIRPORTS, toLocal, fromLocal, pointInPoly, gateSpots } from './geo.js';
+import { heightAt, AIRPORTS, toLocal, fromLocal, pointInPoly, gateSpots, WATER_LEVEL } from './geo.js';
 import { mulberry } from './noise.js';
 import { lightMaterial, makePoints, pbr, flattenStatic, pavementMaterial, canvasTex } from './world.js';
 import { airlinerGeometry, airlinerMaterials, airlinerRest } from './airliner.js';
 import { buildGateServices } from './groundservices.js?v=20261124b';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { smoothLine, resampleLine, buildTaxiMarkings, signBodies } from './airportmarks.js?v=20261124f';
 
 const D2R = Math.PI / 180;
 
 // ---------------- runway markings (R = white, G = yellow, B = rubber) ----------------
 function barCount(w) { return w < 20 ? 4 : w < 26 ? 6 : w < 35 ? 8 : w < 50 ? 12 : 16; }
 function runwayMarkings(r) {
-  const S = r.len > 2600 ? 1.6 : 2, W = r.wid > 40 ? 192 : 128;
+  const S = Math.min(2.4, 8192 / r.len), W = r.wid > 40 ? 256 : 160;
+  const outline = r.surf === 'concrete'; let pass = 0; // pass 0: black borders (blue channel) around markings on light pavement
+  let OB = 0;
   const H = Math.min(8192, Math.round(r.len * S)); const s = H / r.len, ax = W / r.wid;
   const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d');
   g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
@@ -23,17 +26,23 @@ function runwayMarkings(r) {
   const rect = (e, d0, d1, w0, w1, col = white) => {
     const u0 = e === 0 ? -r.len / 2 + d0 : r.len / 2 - d1, u1 = e === 0 ? -r.len / 2 + d1 : r.len / 2 - d0;
     const v0 = e === 0 ? w0 : -w1, v1 = e === 0 ? w1 : -w0;
-    g.fillStyle = col; g.fillRect((v0 + W2) * ax, (r.len / 2 - u1) * s, (v1 - v0) * ax, (u1 - u0) * s);
+    const e2 = pass === 0 ? OB : 0; if (pass === 0 && !outline) return;
+    g.fillStyle = pass === 0 ? '#0000ff' : col; g.fillRect((v0 - e2 + W2) * ax, (r.len / 2 - u1 - e2) * s, (v1 - v0 + 2 * e2) * ax, (u1 - u0 + 2 * e2) * s);
   };
   const text = (e, d, str, hgt) => {
     const uC = e === 0 ? -r.len / 2 + d : r.len / 2 - d;
     g.save(); g.translate(W / 2, (r.len / 2 - uC) * s); g.scale(ax, s); if (e === 1) g.rotate(Math.PI);
-    g.fillStyle = white; g.font = `700 ${hgt * 1.38}px "Barlow Condensed", "Arial Narrow", sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
-    const k = Math.min(1, r.wid / 30); g.scale(0.5 * k, 1); g.fillText(str, 0, 0); g.restore();
+    g.font = `700 ${hgt * 1.38}px "Barlow Condensed", "Arial Narrow", sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+    const k = Math.min(1, r.wid / 30); g.scale(0.5 * k, 1);
+    if (pass === 0) { if (outline) { g.strokeStyle = '#0000ff'; g.lineWidth = 1.2; g.lineJoin = 'round'; g.strokeText(str, 0, 0); } } else { g.fillStyle = white; g.fillText(str, 0, 0); }
+    g.restore();
   };
+  // faint tyre-track band along the centreline (most traffic rolls the middle third)
+  { const grd = g.createLinearGradient(0, 0, W, 0); grd.addColorStop(0.3, 'rgba(0,0,255,0)'); grd.addColorStop(0.5, 'rgba(0,0,255,0.13)'); grd.addColorStop(0.7, 'rgba(0,0,255,0)'); g.fillStyle = grd; g.fillRect(0, 0, W, H); }
+  const thrD = [r.disp[0] || 0, r.disp[1] || 0];
+  for (pass = outline ? 0 : 1, OB = 0.3; pass < 2; pass++) {
   // side stripes
   if (r.wid >= 23) { rect(0, 0, r.len, -W2 + 0.3, -W2 + 1.2); rect(0, 0, r.len, W2 - 1.2, W2 - 0.3); }
-  const thrD = [r.disp[0] || 0, r.disp[1] || 0];
   for (let e = 0; e < 2; e++) {
     const T = thrD[e];
     // displaced threshold: arrows + threshold bar
@@ -66,6 +75,7 @@ function runwayMarkings(r) {
   const c0 = (r._desig[0]), c1 = r.len - r._desig[1];
   const cw = r.ilsList?.length ? 0.9 : 0.45;
   for (let d = c0; d < c1 - 36; d += 61) rect(0, d, d + 36.5, -cw / 2, cw / 2);
+  }
   // rubber in touchdown zones + general wear
   g.globalCompositeOperation = 'lighter';
   for (let e = 0; e < 2; e++) for (let i = 0; i < 2200; i++) {
@@ -143,11 +153,37 @@ function polyGeometry(outer, holes, lift, gh) {
   for (const t of tris) idx.push(t[0], t[2], t[1]);
   return finishFlat(pos, uv, uvm, idx);
 }
-function taxiTex() {
-  const c = document.createElement('canvas'); c.width = 64; c.height = 64; const g = c.getContext('2d');
-  g.fillStyle = '#000'; g.fillRect(0, 0, 64, 64);
-  g.fillStyle = '#00ff00'; g.fillRect(31, 0, 2, 64);
+// taxiway surface (paint is separate geometry): faint tyre band along the middle, worn edges; concrete adds slab joints
+// (PCC taxiways are poured in lanes ~1/3 of the width, transverse joints every ~6-8 m)
+function taxiTex(concrete = false) {
+  const W = 128, H = 256, c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d');
+  g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+  const grd = g.createLinearGradient(0, 0, W, 0);
+  grd.addColorStop(0.36, 'rgba(0,0,255,0)'); grd.addColorStop(0.5, 'rgba(0,0,255,0.2)'); grd.addColorStop(0.64, 'rgba(0,0,255,0)');
+  g.fillStyle = grd; g.fillRect(0, 0, W, H);
+  const rnd = mulberry(concrete ? 913 : 517); g.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 70; i++) { g.fillStyle = `rgba(0,0,255,${(0.03 + rnd() * 0.07).toFixed(3)})`; g.beginPath(); g.ellipse(W * (0.4 + rnd() * 0.2), rnd() * H, 1 + rnd() * 3, 4 + rnd() * 18, 0, 0, 7); g.fill(); }
+  if (concrete) {
+    g.fillStyle = 'rgba(0,0,255,0.3)';
+    for (const x of [W / 3, 2 * W / 3]) g.fillRect(Math.round(x), 0, 1, H);
+    g.fillRect(0, 0, W, 1); // the texture repeats every 8 m along the taxiway: one transverse joint per slab
+  }
   const t = canvasTex(c); t.wrapT = THREE.RepeatWrapping; return t;
+}
+// blast pad chevrons: 3 ft yellow stripes at 45 deg, apex toward the runway (uvm.y = 0 at u0, 1 at u1)
+function blastTex(wid, len, runwayAtTop) {
+  const W = 128, H = Math.round(len * 4), c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d');
+  g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+  const ax = W / wid, ay = H / len; g.strokeStyle = '#00ff00'; g.lineWidth = 0.9 * ay; g.lineCap = 'butt';
+  // canvas row 0 maps to uvm.y = 0 after flipY? canvasTex keeps flipY, so canvas top is uvm.y = 1
+  for (let d = 8; d < len - 2; d += 30) {
+    const yA = runwayAtTop ? d : len - d; // apex distance from the canvas top (runway side)
+    const yB = runwayAtTop ? d + wid / 2 : len - d - wid / 2;
+    g.beginPath(); g.moveTo(0, yB * ay); g.lineTo(W / 2, yA * ay); g.lineTo(W, yB * ay); g.stroke();
+  }
+  g.globalCompositeOperation = 'lighter'; const rnd = mulberry(Math.round(wid * len));
+  for (let i = 0; i < 60; i++) { g.fillStyle = `rgba(0,0,255,${(0.04 + rnd() * 0.1).toFixed(3)})`; g.beginPath(); g.arc(rnd() * W, rnd() * H, 2 + rnd() * 10, 0, 7); g.fill(); }
+  return canvasTex(c);
 }
 function apronTex() {
   const c = document.createElement('canvas'); c.width = 256; c.height = 256; const g = c.getContext('2d');
@@ -567,10 +603,19 @@ let MATS = null;
 export async function buildAirports(scene, envMap, buildAircraftFn, elevationProvider = null, airportList = AIRPORTS) {
   if (!MATS) {
     const [asph, conc, B] = await Promise.all([pbr('asphalt_02', 1), pbr('concrete_floor_02', 1), buildingMaterials(true)]);
-    MATS = { asph, conc, B, taxi: taxiTex(), apron: apronTex() };
+    MATS = { asph, conc, B, taxi: taxiTex(), taxiC: taxiTex(true), apron: apronTex() };
     MATS.taxiM = pavementMaterial(asph, MATS.taxi, 0.82, 0.5);
+    MATS.taxiCM = pavementMaterial(conc, MATS.taxiC, 0.92, 0.45);
+    MATS.taxiCM.polygonOffset = true; MATS.taxiCM.polygonOffsetFactor = -1; MATS.taxiCM.polygonOffsetUnits = -1;
+    // paved shoulders: older, darker asphalt that sits just below the aprons
+    MATS.shoulderM = pavementMaterial(asph, MATS.taxi, 0.6, 0.35);
+    MATS.shoulderM.polygonOffset = true; MATS.shoulderM.polygonOffsetFactor = -1; MATS.shoulderM.polygonOffsetUnits = -1;
+    // paint: yellow per FAA (linear-space value matching the runway shader), black borders, sign atlas per airport
+    MATS.yellowM = new THREE.MeshStandardMaterial({ color: new THREE.Color().setRGB(0.78, 0.58, 0.08), roughness: 0.55, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+    MATS.blackM = new THREE.MeshStandardMaterial({ color: new THREE.Color().setRGB(0.018, 0.018, 0.02), roughness: 0.85, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+    MATS.signBodyM = new THREE.MeshStandardMaterial({ color: 0x2a2c2f, roughness: 0.7, metalness: 0.2 });
     MATS.apronM = pavementMaterial(conc, MATS.apron, 0.9, 0.6);
-    MATS.lineM = new THREE.MeshStandardMaterial({ color: 0xc89a18, roughness: 0.6, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+    MATS.lineM = new THREE.MeshStandardMaterial({ color: new THREE.Color().setRGB(0.78, 0.58, 0.08), roughness: 0.6, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
     MATS.glass = new THREE.MeshPhysicalMaterial({ color: 0x1c3646, roughness: 0.05, metalness: 0.3, envMapIntensity: 1.5, transparent: true, opacity: 0.8 });
     MATS.taxiM.polygonOffset = true; MATS.taxiM.polygonOffsetFactor = -1; MATS.taxiM.polygonOffsetUnits = -1;
     MATS.apronM.polygonOffset = true; MATS.apronM.polygonOffsetFactor = 0; MATS.apronM.polygonOffsetUnits = 0;
@@ -578,7 +623,7 @@ export async function buildAirports(scene, envMap, buildAircraftFn, elevationPro
   const { asph, conc, B } = MATS;
   const group = new THREE.Group(); scene.add(group); const gateFx = [];
   const lightsList = [], papis = [], beacons = [], strobes = [], nightMats = [B.glass, B.office, B.brick, B.hangar, B.house, B.thangar, B.hdoor];
-  const ownMats = [];
+  const ownMats = [], signMats = [];
   for (const a of airportList) {
     const gh = (x, z) => { const c = elevationProvider?.(x, z); return Number.isFinite(c) ? c : heightAt(x, z); };
     // ---- runways ----
@@ -587,23 +632,39 @@ export async function buildAirports(scene, envMap, buildAircraftFn, elevationPro
       const mat = pavementMaterial(conc_ ? conc : asph, runwayMarkings(r), conc_ ? 0.95 : 0.9); ownMats.push(mat);
       mat.polygonOffset = true; mat.polygonOffsetFactor = -2; mat.polygonOffsetUnits = -2;
       const m = new THREE.Mesh(stripGeometry(r, -r.len / 2, r.len / 2, -r.wid / 2, r.wid / 2, 12, 0.1, gh), mat); m.receiveShadow = true; group.add(m);
+      // blast pads beyond each end: non-movement pavement marked with yellow chevrons pointing at the runway (FAA AIM 2-3-5)
+      if (r.len >= 1500) for (const e of [0, 1]) {
+        const PL = 60, sg = e === 0 ? -1 : 1, uc = sg * (r.len / 2 + PL / 2);
+        const c = fromLocal(r, uc, 0);
+        if (gh(c.x, c.z) < WATER_LEVEL + 0.5 || heightAt(c.x, c.z) < WATER_LEVEL + 0.5) continue;
+        if (a.runways.some((o) => o !== r && (() => { const L = toLocal(o, c.x, c.z); return Math.abs(L.u) < o.len / 2 + 40 && Math.abs(L.v) < o.wid / 2 + 40; })())) continue;
+        const bm = pavementMaterial(asph, blastTex(r.wid, PL, e === 0), 0.78); ownMats.push(bm);
+        bm.polygonOffset = true; bm.polygonOffsetFactor = -2; bm.polygonOffsetUnits = -2;
+        const u0 = e === 0 ? -r.len / 2 - PL : r.len / 2, u1 = e === 0 ? -r.len / 2 : r.len / 2 + PL;
+        const pm = new THREE.Mesh(stripGeometry(r, u0, u1, -r.wid / 2, r.wid / 2, 12, 0.095, gh), bm); pm.receiveShadow = true; pm.userData.pave = true; group.add(pm);
+      }
     }
     // ---- taxiways, aprons ----
-    const tg = [], ag = [], lg = [];
+    const tg = [], ag = [], lg = [], sg = [];
+    const major = a.size === 'L' || !!GATE_MIX[a.icao];
+    const paths = [];
     a.taxiways.forEach((t, i) => {
       if (t.p.length < 2) return;
       if (t.lane) { const g = ribbon(t.p, 0.3, 0.1, gh, false); if (g) lg.push(g); return; }
-      const g = ribbon(t.p, t.w, 0.08 + (i % 5) * 0.002, gh); if (g) tg.push(g);
-      for (let k = 1; k < t.p.length - 1; k++) {
-        const ax = t.p[k][0] - t.p[k - 1][0], az = t.p[k][1] - t.p[k - 1][1], bx = t.p[k + 1][0] - t.p[k][0], bz = t.p[k + 1][1] - t.p[k][1];
-        const c = (ax * bx + az * bz) / (Math.hypot(ax, az) * Math.hypot(bx, bz) || 1); if (c < 0.92) tg.push(disc(t.p[k][0], t.p[k][1], t.w * 0.62, 0.078, gh));
+      // fillet the OSM polyline's corners so pavement and centerline curve like real taxiway turns
+      const pts = smoothLine(t.p, Math.max(6, t.w * 1.1));
+      paths.push({ t, pts });
+      const g = ribbon(pts, t.w, 0.08 + (i % 5) * 0.002, gh); if (g) tg.push(g);
+      for (let k = 1; k < pts.length - 1; k++) {
+        const ax = pts[k][0] - pts[k - 1][0], az = pts[k][1] - pts[k - 1][1], bx = pts[k + 1][0] - pts[k][0], bz = pts[k + 1][1] - pts[k][1];
+        const c = (ax * bx + az * bz) / (Math.hypot(ax, az) * Math.hypot(bx, bz) || 1); if (c < 0.7) tg.push(disc(pts[k][0], pts[k][1], t.w * 0.55, 0.078, gh));
       }
       // edge lights (blue)
       for (let k = 0; k + 1 < t.p.length; k++) {
         const [x0, z0] = t.p[k], [x1, z1] = t.p[k + 1]; const L = Math.hypot(x1 - x0, z1 - z0); const px = -(z1 - z0) / (L || 1), pz = (x1 - x0) / (L || 1);
         for (let d = 15; d < L; d += 60) for (const sd of [-1, 1]) { const x = x0 + (x1 - x0) * d / L + px * sd * (t.w / 2 + 1), z = z0 + (z1 - z0) * d / L + pz * sd * (t.w / 2 + 1); lightsList.push({ p: [x, gh(x, z) + 0.35, z], c: [0.12, 0.3, 1], s: 0.75 }); }
       }
-      // hold-short markings where the taxiway enters a runway's protected area
+      // runway guard lights (wig-wag, yellow) at the holding positions
       for (const r of a.runways) {
         const hd = r.wid / 2 + (r.len > 2400 ? 60 : r.wid >= 30 ? 45 : 25);
         for (let k = 0; k + 1 < t.p.length; k++) {
@@ -612,22 +673,32 @@ export async function buildAirports(scene, envMap, buildAircraftFn, elevationPro
             const fa = A.v * sd - hd, fb = Bq.v * sd - hd; if (fa * fb >= 0) continue;
             const s = fa / (fa - fb); const u = A.u + (Bq.u - A.u) * s; if (Math.abs(u) > r.len / 2) continue;
             const x = t.p[k][0] + (t.p[k + 1][0] - t.p[k][0]) * s, z = t.p[k][1] + (t.p[k + 1][1] - t.p[k][1]) * s;
-            // direction toward runway along the taxiway
-            let dx = t.p[k + 1][0] - t.p[k][0], dz = t.p[k + 1][1] - t.p[k][1]; const L = Math.hypot(dx, dz) || 1; dx /= L; dz /= L; if (fa < 0) { dx = -dx; dz = -dz; }
+            let dx = t.p[k + 1][0] - t.p[k][0], dz = t.p[k + 1][1] - t.p[k][1]; const L = Math.hypot(dx, dz) || 1; dx /= L; dz /= L;
             const px = -dz, pz = dx, hw = t.w / 2;
-            const quad = (o0, o1, w0, w1) => {
-              const P = []; for (const [o, w] of [[o0, w0], [o1, w0], [o1, w1], [o0, w0], [o1, w1], [o0, w1]]) { const X = x + dx * o + px * w, Z = z + dz * o + pz * w; P.push(X, gh(X, Z) + 0.12, Z); }
-              const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute([0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0], 3)); lg.push(g);
-            };
-            // two solid lines (taxiway side) + two dashed (runway side)
-            quad(-1.5, -1.2, -hw, hw); quad(-0.9, -0.6, -hw, hw);
-            for (let w = -hw; w < hw; w += 1.8) { quad(-0.3, 0, w, Math.min(hw, w + 0.9)); quad(0.3, 0.6, w, Math.min(hw, w + 0.9)); }
-            // runway guard lights (wig-wag, yellow) at both sides
-            for (const sg of [-1, 1]) strobes.push({ p: [x + px * sg * (hw + 2), gh(x, z) + 0.6, z + pz * sg * (hw + 2)], c: [1, 0.75, 0.1], s: 1.3, ph: sg > 0 ? 0 : 0.5, kind: 'wig' });
+            for (const sg2 of [-1, 1]) strobes.push({ p: [x + px * sg2 * (hw + 2), gh(x, z) + 0.6, z + pz * sg2 * (hw + 2)], c: [1, 0.75, 0.1], s: 1.3, ph: sg2 > 0 ? 0 : 0.5, kind: 'wig' });
           }
         }
       }
     });
+    // ---- taxiway paint + signs (FAA AC 150/5340-1 / AIM 2-3) ----
+    const anyConc = a.runways.some((r) => r.surf === 'concrete');
+    for (const P of paths) P.S = resampleLine(P.pts, 2);
+    const MK = buildTaxiMarkings(a, paths, gh, { major, outline: true });
+    const posGeo = (arr) => { if (!arr.length) return null; const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(new Float32Array(arr.length).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3)); return g; };
+    const addMesh = (g, mat, shadow = true) => { if (!g) return null; g.computeBoundingSphere(); const m = new THREE.Mesh(g, mat); m.receiveShadow = shadow; m.userData.pave = true; group.add(m); return m; };
+    addMesh(posGeo(MK.yellow), MATS.yellowM); addMesh(posGeo(MK.black), MATS.blackM);
+    for (const sh of MK.shoulders) { const g = ribbon(sh.pts, sh.w, 0.055, gh, false); if (g) sg.push(g); }
+    if (MK.atlas.list.length) {
+      const tex = MK.atlas.build(); MK.atlas.fixUV(MK.paintUV); MK.atlas.fixUV(MK.faceUV);
+      const paintM = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -5, polygonOffsetUnits: -5 });
+      const faceM = new THREE.MeshStandardMaterial({ map: tex, color: 0xb8b8b8, roughness: 0.9, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0, side: THREE.DoubleSide });
+      ownMats.push(paintM, faceM); signMats.push(faceM);
+      const uvGeo = (p, uv) => { const g = posGeo(p); if (g) g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); return g; };
+      addMesh(uvGeo(MK.paint, MK.paintUV), paintM);
+      const fm = addMesh(uvGeo(MK.faces, MK.faceUV), faceM); if (fm) { fm.castShadow = false; fm.userData.pave = false; }
+      const bodies = signBodies(MK.posts); if (bodies.length) { const bg = mergeGeometries(bodies, false); if (bg) { const bm = addMesh(bg, MATS.signBodyM); bm.castShadow = true; bm.userData.pave = false; } }
+      a.signTex = tex;
+    }
     for (const ap of a.aprons) { const g = polyGeometry(ap.p, ap.h, ap.synth ? 0.072 : 0.06, gh); if (g) ag.push(g); }
     const mergeAdd = (list, mat) => {
       if (!list.length) return; const lst = list.map((g) => (g.index ? g.toNonIndexed() : g));
@@ -635,7 +706,7 @@ export async function buildAirports(scene, envMap, buildAircraftFn, elevationPro
       const has = (k) => lst.every((g) => g.attributes[k]); for (const g of lst) for (const k of ['uv', 'uvm']) if (!has(k) && g.attributes[k]) g.deleteAttribute(k);
       const g = mergeGeometries(lst, false); if (!g) return; g.computeBoundingSphere(); const m = new THREE.Mesh(g, mat); m.receiveShadow = true; m.userData.pave = true; group.add(m);
     };
-    mergeAdd(ag, MATS.apronM); mergeAdd(tg, MATS.taxiM); mergeAdd(lg, MATS.lineM);
+    mergeAdd(ag, MATS.apronM); mergeAdd(tg, major && anyConc ? MATS.taxiCM : MATS.taxiM); mergeAdd(lg, MATS.lineM); mergeAdd(sg, MATS.shoulderM);
     // ---- buildings: typology from footprint shape + OSM tags, roof colours sampled from the orthophoto ----
     buildAirportBuildings(a, gh, B, group);
     // ---- control tower ----
@@ -781,6 +852,7 @@ export async function buildAirports(scene, envMap, buildAircraftFn, elevationPro
 
   const updateLights = (camPos, night, t) => {
     lm.uniforms.uNight.value = night;
+    for (const m of signMats) m.emissiveIntensity = night * 0.9;
     for (const m of nightMats) if (m.userData.uNight) m.userData.uNight.value = night;
     const col = papiPts.geometry.attributes.color; let idx = 0;
     for (const p of papis) {
@@ -814,7 +886,7 @@ export async function buildAirports(scene, envMap, buildAircraftFn, elevationPro
       if (o.isInstancedMesh) { o.dispose(); return; }
       if (o.geometry && !o.userData.shared) o.geometry.dispose();
     });
-    for (const m of ownMats) { m.userData.markTex?.dispose(); m.dispose(); }
+    for (const m of ownMats) { m.userData.markTex?.dispose(); m.map?.dispose(); m.dispose(); }
     for (const a of airportList) { delete a.windsock; delete a.windsocks; delete a.towerPos; }
   };
   const updateServices = (dt, camPos, t) => { for (const g of gateFx) g.update(dt, camPos, t); };

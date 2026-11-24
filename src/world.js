@@ -75,14 +75,21 @@ export function stripGeometry(a, u0, u1, v0, v1, du = 12, lift = 0.07, groundHei
 export function pavementMaterial(asph, markTex, tint = 1, ortho = 0) {
   const m = new THREE.MeshStandardMaterial({ map: asph.diff, normalMap: asph.nor, roughnessMap: asph.rough, roughness: 1, color: new THREE.Color(tint, tint, tint), normalScale: new THREE.Vector2(0.8, 0.8) });
   m.onBeforeCompile = (sh) => {
-    sh.uniforms.uMark = { value: markTex };
+    sh.uniforms.uMark = { value: markTex }; sh.uniforms.uMarkSize = { value: new THREE.Vector2(markTex.image?.width || 64, markTex.image?.height || 64) };
     if (ortho) Object.assign(sh.uniforms, ORTHO_UNIFORMS);
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec2 uvm; varying vec2 vUvm; varying vec3 vWp;')
       .replace('#include <uv_vertex>', '#include <uv_vertex>\nvUvm = uvm;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWp = (modelMatrix*vec4(transformed,1.0)).xyz;');
-    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D uMark; varying vec2 vUvm; varying vec3 vWp;' + (ortho ? ORTHO_GLSL : ''))
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D uMark; uniform vec2 uMarkSize; varying vec2 vUvm; varying vec3 vWp;' + (ortho ? ORTHO_GLSL : ''))
       .replace('#include <map_fragment>', `#include <map_fragment>
         vec4 mk = texture2D(uMark, vUvm);
+        { // crisp paint edges when magnified (bilinear filtering otherwise smears 0.4 m texels into soft blobs)
+          vec2 tc = vUvm * uMarkSize; float tpp = max(length(dFdx(tc)), length(dFdy(tc)));
+          float shp = 1.0 - smoothstep(0.6, 1.6, tpp);
+          vec2 fw = max(fwidth(mk.rg), vec2(1e-3));
+          vec2 crisp = smoothstep(0.5 - fw * 0.7, 0.5 + fw * 0.7, mk.rg);
+          mk.rg = mix(mk.rg, crisp, shp);
+        }
         float macro = texture2D(map, vWp.xz*0.0061).g;
         diffuseColor.rgb *= 0.78 + 0.45*macro;
         ${ortho ? `{ // real pavement tone from the orthophoto, blurred (mip bias) so photo markings don't ghost
