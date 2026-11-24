@@ -51,6 +51,10 @@ function nameOf(ref) {
 
 // Dijkstra over the taxi graph from every off-runway node within `seedR` of (x, z);
 // crossing / using any runway surface is heavily penalised, apron lanes slightly
+// optional per-edge cost hook set by the traffic manager while it plans a route, so new taxi routes
+// avoid running head-on against aircraft already using a taxiway (X-Plane 12.1.3 does the same)
+let EDGE_COST = null;
+export function setTaxiCost(fn) { EDGE_COST = fn; }
 function search(a, x, z, seedR = 200, avoid = null) {
   const G = buildGraph(a); const { nodes, adj } = G; if (!nodes.length) return null;
   const N = nodes.length, dist = new Float64Array(N).fill(Infinity), prev = new Int32Array(N).fill(-1), done = new Uint8Array(N);
@@ -69,7 +73,7 @@ function search(a, x, z, seedR = 200, avoid = null) {
   while (heap.length) {
     const [d, i] = pop(); if (done[i]) continue; done[i] = 1;
     for (const e of adj[i]) {
-      const w = e.d * (rw[e.j] || rw[i] ? 6 : 1) * (e.lane ? 1.15 : 1) * (avoid && avoid(nodes[e.j]) ? 4 : 1);
+      const w = e.d * (rw[e.j] || rw[i] ? 6 : 1) * (e.lane ? 1.15 : 1) * (avoid && avoid(nodes[e.j]) ? 4 : 1) * (EDGE_COST ? EDGE_COST(nodes[i], nodes[e.j]) : 1);
       if (d + w < dist[e.j]) { dist[e.j] = d + w; prev[e.j] = i; push(d + w, e.j); }
     }
   }
