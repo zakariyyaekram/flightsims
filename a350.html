@@ -256,7 +256,7 @@ window.startEdition = function (mode) {
     window.chooseLoadMode(mode);
     return;
   }
-  import('./src/a350/main.js?v=20261124e').then(() => {
+  import('./src/a350/main.js?v=20261124v').then(() => {
     if (typeof window.chooseLoadMode === 'function') window.chooseLoadMode(mode);
     else if (text) text.textContent = 'Failed to load the flight simulator.';
   }).catch((error) => {
@@ -267,6 +267,6 @@ window.startEdition = function (mode) {
 </script>
 <script src="./src/flightsetup.js?v=20261124e"></script>
 <script src="./src/picker.js?v=20261124e"></script>
-<script type="module" src="./src/a350/main.js?v=20261124e"></script>
+<script type="module" src="./src/a350/main.js?v=20261124v"></script>
 </body>
 </html>

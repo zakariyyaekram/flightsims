@@ -1,4 +1,14 @@
-const ACCESS_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6InhyXzVTa2NJbVFuYzhhR28iLCJqdGkiOiIyMmIyMDJjOS02MWVmLTQxMTAtYmUyMC05ZDUxM2QyODA0OGYiLCJpZCI6NTUzMDAzLCJpc3MiOiJodHRwczovL2FwaS5jZXNpdW0uY29tIiwiYXVkIjoidW5kZWZpbmVkX2RlZmF1bHQiLCJpYXQiOjE3OTUxMTMxMzV9.yilqEPp5oCkU3ja_qDd7A2-d-50RA';
+const DEFAULT_ACCESS_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6InhyXzVTa2NJbVFuYzhhR28iLCJqdGkiOiIyMmIyMDJjOS02MWVmLTQxMTAtYmUyMC05ZDUxM2QyODA0OGYiLCJpZCI6NTUzMDAzLCJpc3MiOiJodHRwczovL2FwaS5jZXNpdW0uY29tIiwiYXVkIjoidW5kZWZpbmVkX2RlZmF1bHQiLCJpYXQiOjE3OTUxMTMxMzV9.yilqEPp5oCkU3ja_qDd7A2-d-50RA';
+// A different Cesium ion token can be used without editing code: open the page once with
+// ?ionToken=<token> (it is remembered in localStorage) or set localStorage.cesiumIonToken.
+function ionToken() {
+  try {
+    const q = new URLSearchParams(location.search).get('ionToken');
+    if (q) localStorage.setItem('cesiumIonToken', q);
+    return localStorage.getItem('cesiumIonToken') || DEFAULT_ACCESS_TOKEN;
+  } catch { return DEFAULT_ACCESS_TOKEN; }
+}
+const ACCESS_TOKEN = ionToken();
 
 export const CESIUM_ORIGIN = {
   longitude: -122.3790,

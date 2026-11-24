@@ -22,12 +22,12 @@ import { resolveFlight, enRoutePoint } from '../flightplan.js?v=20261124e';
 import { tickGSE, GSE } from '../gse.js';
 import { remap, buildControlsUI, changedCount, mouseSettings, mouseAxis } from '../controls.js?v=20261123g';
 import { PerfMonitor } from '../perf.js?v=20261123g';
-import { initCesium, syncCesiumCamera, getCesiumElevationWorld, warmCesiumTerrain, setCesiumQuality } from '../cesium.js?v=20261123g';
+import { initCesium, syncCesiumCamera, getCesiumElevationWorld, warmCesiumTerrain, setCesiumQuality } from '../cesium.js?v=20261124t';
 import { KT, FT, NM, A350, CONFS, DETENT } from './data.js';
 import { JetFDM } from './fdm.js';
 import { Systems } from './systems.js';
 import { FMS } from './fms.js';
-import { AFS } from './afs.js';
+import { AFS } from './afs.js?v=20261124u';
 import { Displays } from './displays.js';
 import { buildOverhead, buildGlareshield, buildPedestal, buildGearPanel } from './panels.js';
 import { buildCockpit } from './cockpit.js';
@@ -158,6 +158,7 @@ async function init() {
     progress(0.36, 'Loading World Terrain, aerial imagery and 3D buildings…');
   } else progress(0.36, 'Loading local terrain and flight systems…');
   const useLocalScenery = loadMode !== 'heavy' || !cesiumViewer;
+  sim.edition = { mode: loadMode, cesium: !!cesiumViewer, fallback: loadMode === 'heavy' && !cesiumViewer };
   if (useLocalScenery) {
     if (loadMode === 'light') { ground = new GroundOverlay(); if (!(await ground.init('../data/'.replace('../', './')))) ground = null; sim.ground = ground; }
     terrainMat = await createTerrainMaterial((p) => progress(0.38 + p * 0.12, 'Loading terrain textures…'), loadMode === 'light' ? 512 : 1024, ground ? ground.uniforms : null);
@@ -313,7 +314,7 @@ function applySetup(s, warmOnly = false) {
     const e = fms.dest.end; const c = e.hdg * D2R; let d = (R.arrILS ? 11 : 7) * NM;
     // shorter final when the full one would start outside the scenery (e.g. SJC 30L from the south-east)
     while (d > 5 * NM && !inWorld(e.x - Math.sin(c) * d, e.z + Math.cos(c) * d, 4000)) d -= NM;
-    pos = { x: e.x - Math.sin(c) * d, z: e.z + Math.cos(c) * d }; hdg = e.hdg; onGround = false; speed = 175; conf = 4;
+    pos = { x: e.x - Math.sin(c) * d, z: e.z + Math.cos(c) * d }; hdg = e.hdg; onGround = false; speed = 165; conf = 5; // CONF FULL, matching the landing data
     alt = R.arrILS ? 3000 * FT + e.elev + (s.qnh - 1013) * 27 * FT : e.elev + Math.tan(3 * D2R) * d + 15;
   } else if (stage === 'climb') {
     // climbing out on runway heading, 4 nm past the departure end, clean
@@ -339,6 +340,7 @@ function applySetup(s, warmOnly = false) {
   warmCesiumTerrain(pos.x, pos.z);
   F.reset({ pos: [pos.x, onGround ? gh + A350.cgHeight : alt, pos.z], hdg, onGround, running: !cold && (!sp.gate || sp.running), speedKt: speed, gearDown, slat: cfg.slat, flap: cfg.flap });
   if (onGround) F.settleOnGround?.();
+  else { F.agl = F.ra = Math.max(0, alt - gh); } // radio altitude is valid at once, so the AP can engage on an airborne spawn
   S.reset(cold, { gpu: sp.gate && !sp.running });
   if (!cold) for (const k of ['CO', 'CI', 'CU', 'CL', 'FI', 'FO', 'ISIS']) S.du[k] = { t: 30 }; // displays already booted
   if (sp.gate && !cold && !sp.running) { S.master = [false, false]; S.press('EXT1', true); S.press('EXT2', true); S.press('APUGEN', true); }
@@ -854,6 +856,7 @@ $('fly').onclick = () => {
   if (ramp && airports?.loaded?.has(R.dep) && !airport(R.dep)._builtReserved) { airport(R.dep)._builtReserved = true; airports.rebuild(R.dep); }
   applySetup(s);
   showMenu(false); $('hud').classList.remove('hidden'); $('crash').classList.add('hidden');
+  if (sim.edition?.fallback) toast('Heavy Edition: Cesium World Terrain could not be reached, flying on the local Bay Area scenery instead', 6000);
   sim.started = true; togglePause(false); setView(sim.view === 'walk' ? 'cockpit' : sim.view);
   const rt = `${R.dep} ${R.depRwy} → ${R.dest} ${R.arrRwy}`;
   const msg = {
@@ -997,7 +1000,7 @@ window.advanceTime = (ms) => { const steps = Math.max(1, Math.round(ms / (1000 /
 window.render_game_to_text = () => {
   const F = fdm, a = F.attitude; const m = afs.fma();
   return JSON.stringify({
-    aircraft: 'A350-1000', coords: 'world x=east m, z=south m, y=up m (MSL)', ready: !!sim.ready, started: sim.started, paused: sim.paused, view: sim.view,
+    aircraft: 'A350-1000', edition: sim.edition || null, coords: 'world x=east m, z=south m, y=up m (MSL)', ready: !!sim.ready, started: sim.started, paused: sim.paused, view: sim.view,
     pos: F.pos.map((v) => Math.round(v * 10) / 10), raFt: Math.round((F.ra || 0) / FT), ias: Math.round(F.ind.ias), altFt: Math.round(F.ind.alt), vsFpm: Math.round(F.ind.vsi),
     hdg: Math.round(a.hdg), pitch: +a.pitch.toFixed(1), roll: +a.roll.toFixed(1), n1: F.E.map((e) => Math.round(e.n1)), engines: F.E.map((e) => !!e.running), onGround: !!F.onGround,
     tla: F.ctrl.tla.map((v) => +v.toFixed(2)), conf: CONFS[S.confIdx()].id, gear: +F.gear.pos.toFixed(2), crashed: F.crashed, ap: afs.ap, fma: m, phase: fms.phase,

@@ -29,7 +29,7 @@ import { PlayerGroundServices } from './groundservices.js?v=20261124b';
 import { tickGSE } from './gse.js?v=20261124b';
 import { remap, buildControlsUI, changedCount, mouseSettings, mouseAxis } from './controls.js?v=20261123g';
 import { PerfMonitor } from './perf.js?v=20261123g';
-import { initCesium, syncCesiumCamera, getCesiumElevationWorld, warmCesiumTerrain, setCesiumQuality } from './cesium.js?v=20261123g';
+import { initCesium, syncCesiumCamera, getCesiumElevationWorld, warmCesiumTerrain, setCesiumQuality } from './cesium.js?v=20261124t';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));

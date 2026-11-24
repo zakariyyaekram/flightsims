@@ -16,6 +16,16 @@ Main keys: `Shift+E` automatic engine start, `W/S` thrust lever detents, `F/V` f
 
 Research sources: [Airbus A350-1000](https://www.aircraft.airbus.com/en/aircraft/a350/a350-1000), [Airbus A350 Facts & Figures](https://www.airbus.com/sites/default/files/2025-04/Airbus-A350-Family-Facts-and-Figures-April-2025.pdf), [Wikipedia](https://en.wikipedia.org/wiki/Airbus_A350), [DMI Aviation](https://dmiaviation.com/airbus-a350-xwb-specs-history-and-tires/), [A350 FCOM](https://pdfcoffee.com/flight-crew-operating-manual-reference-vir-a350-fleet-fcom-issue-date-15-mar-20-pdf-free.html), [BEA F-HTYO report](https://bea.aero/fileadmin/user_upload/F-HTYO_EN.pdf), [Avioscope ELEC panel](https://www.avioscope.com/articles/airbus-a350-electrical-power-control), [Aerofly A350 flight deck](https://www.aerofly.com/aircraft-tutorials/a350_flightdeck/), [FlightGlobal](https://www.flightglobal.com/a350-flightdeck-an-evolution-of-a380-concept/88047.article).
 
+### A350 checks
+Browser checks for the A350 live in [tests/](./tests). Serve the repo (`python3 -m http.server 8765`), install Playwright (`npm i -D playwright && npx playwright install chromium`), then run:
+
+- `node tests/a350-flight.mjs takeoff`: an FLX takeoff from SFO 28L. It rotates at VR, retracts the gear, engages AP1 above 100 ft, sets the levers to CL at thrust reduction, retracts the flaps and levels off at the FCU altitude. It reports every flight mode change, ECAM alert and master warning.
+- `node tests/a350-flight.mjs autoland`: a CAT 3 DUAL autoland on the ILS 28L, through LAND, FLARE, RETARD and ROLL OUT to a full stop. It checks the touchdown point, centreline, sink rate and stopping distance.
+- `node tests/a350-heavy.mjs`: loads Heavy Edition with the A350 and checks Cesium World Terrain, power, engines and page errors. It saves a screenshot to `/tmp/a350-heavy.jpg`.
+
+### Cesium ion token
+Heavy Edition streams Cesium World Terrain with the token in `src/cesium.js`. If Cesium rejects it, Heavy Edition falls back to the local Bay Area scenery and shows a notice. To use your own token without editing code, open a page once with `?ionToken=<your token>`. It is remembered in `localStorage.cesiumIonToken`.
+
 ## Ground services (Skyhawk)
 Press **J** (or click **GROUND SVC** in the top bar) to open the ground services panel. Services only work where they would in real life: stopped on an airport ramp or apron (not a runway, taxiway or grass), with the parking brake set and the engine shut down for fuel and boarding.
 
