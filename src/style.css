@@ -232,3 +232,9 @@ kbd { font: 500 12px var(--mono); border: 1px solid var(--line); border-radius: 
 #taxiMap .tmLegend { display: flex; flex-wrap: wrap; gap: 14px; padding: 6px 12px; border-top: 1px solid #111; font-size: 11px; color: #333; }
 #taxiMap .lg { display: inline-block; width: 18px; height: 8px; margin-right: 5px; vertical-align: middle; border: 1px solid #555; }
 .lg.rw { background: #111; } .lg.tw { background: #c4c6c8; } .lg.ap { background: #d9dadb; } .lg.bd { background: #a6a8aa; } .lg.hs { background: #d6a400; border: 0; height: 3px; } .lg.rt { background: #d600aa; border: 0; height: 4px; }
+
+/* start screen: step 2 aircraft picker */
+.aircraftActions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.aircraftButton strong { font-size: 16px; }
+.linkButton { background: none; border: 0; padding: 0; color: #8edaff; text-decoration: underline; cursor: pointer; font: inherit; min-height: 0; }
+@media (max-width: 760px) { .aircraftActions { grid-template-columns: 1fr; } }

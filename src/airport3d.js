@@ -715,6 +715,7 @@ export async function buildAirports(scene, envMap, buildAircraftFn, elevationPro
       const spots = gateSpots(a, a.icao === 'KSFO' ? 46 : major ? 22 : 6); const rnd = mulberry(a.icao.charCodeAt(1) * 99 + (major ? 0 : a.icao.charCodeAt(2) * 7));
       const byKey = new Map(); const stands = [];
       spots.forEach((s, i) => {
+        if (a._reservedSpots?.has(i)) return; // stand occupied by the player's aircraft
         if (rnd() < (major ? 0.22 : 0.08)) return; // some gates empty
         let [lv, ty] = mix[Math.floor(rnd() * mix.length)];
         const G = airlinerGeometry(ty); if (G.T.L / 2 + 6 > 40 && rnd() < 0.5) [lv, ty] = mix[0];
