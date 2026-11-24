@@ -10,13 +10,14 @@ import { buildAircraft } from '../aircraft.js?v=20261123g';
 import { Environment } from '../env.js';
 import { buildAirports, RockField, Forest, GrassField } from '../world.js';
 import { Scenery } from '../scenery.js?v=20261123g';
-import { Traffic } from '../traffic.js?v=20261123g';
+import { Traffic } from '../traffic.js?v=20261124c';
+import { Tower } from '../tower.js?v=20261124c';
 import { buildLife } from '../life.js?v=20261123g';
 import { MovingMap } from '../map.js?v=20261123g';
-import { departureRoute, routeProgress } from '../taxi.js?v=20261123g';
-import { toggleTaxiMap, updateTaxiMap, taxiMapOpen } from '../taximap.js?v=20261123g';
+import { departureRoute, routeProgress } from '../taxi.js?v=20261124c';
+import { toggleTaxiMap, updateTaxiMap, taxiMapOpen, taxiChart } from '../taximap.js?v=20261124c';
 import { setAniso } from '../textures.js';
-import { ATC } from '../atc.js?v=20261123g';
+import { ATC } from '../atc.js?v=20261124c';
 import { tickGSE, GSE } from '../gse.js';
 import { remap, buildControlsUI, changedCount, mouseSettings, mouseAxis } from '../controls.js?v=20261123g';
 import { PerfMonitor } from '../perf.js?v=20261123g';
@@ -206,6 +207,7 @@ async function init() {
   sim.life = life; life.setRoadTraffic(readSetup().roadTraffic);
   progress(0.93, 'Air traffic…');
   traffic = new Traffic(scene, { light: loadMode === 'light' }); await traffic.init(buildAircraft); traffic.setEnabled(sim.aiTrafficEnabled !== false);
+  traffic.sim = sim; sim.tower = new Tower(traffic, sim.atc); sim.taxiChart = taxiChart; taxiChart('KSFO');
   sim.traffic = traffic; sim.scenery = scenery; sim.airports = airports; sim.terrain = terrain;
   if (scenery) for (let i = 0; i < 60; i++) scenery.update({ x: fdm.pos[0], z: fdm.pos[2] });
   progress(0.95, 'Charts…');
@@ -349,6 +351,7 @@ function applySetup(s, warmOnly = false) {
   // ATC (shared module) — call sign from the FMS flight number
   sim.atc.reset({ spawn: sp.icao === 'KSFO' ? 'SFO28' : sp.icao === 'KOAK' ? 'OAK30' : 'SJC30' });
   sim.atc.callsign = 'Airbus ' + fms.flightNo.replace(/\D/g, '');
+  if (sim.tower) sim.tower.q.clear();
   sim.rmp[0].active.VHF1 = sim.atc.frequency;
   if (scenery) scenery.setNight(sim.night); if (life) life.setNight(sim.night);
   if (mmap) mmap.track = [];
@@ -784,7 +787,7 @@ function toggleATC(force) {
 }
 function updateATCPanel() {
   const atc = sim.atc; $('atcStatus').textContent = atc.status; $('atcSpeaker').textContent = atc.speaker; $('atcMessage').textContent = atc.transmission;
-  const log = $('atcLog'); log.innerHTML = atc.log.map((l) => `<div class="atcLine ${l.speaker === 'YOU' ? 'you' : ''}"><b>${l.speaker}</b><span>${l.text}</span></div>`).join(''); log.scrollTop = log.scrollHeight;
+  const log = $('atcLog'); log.innerHTML = atc.log.map((l) => `<div class="atcLine ${l.speaker === 'YOU' ? 'you' : l.ai ? 'ai' : ''}"><b>${l.speaker}</b><span>${l.text}</span></div>`).join(''); log.scrollTop = 0;
   sim.atcLog = atc.log;
   const opts = $('atcOptions'); opts.replaceChildren();
   for (const o of atc.options) { const b = document.createElement('button'); b.type = 'button'; b.textContent = o.label; b.onclick = () => { atc.act(o.action, sim); updateATCPanel(); }; opts.appendChild(b); }
@@ -863,7 +866,8 @@ function frame(dtReal) {
     const gust = sim.weather.turb * 0.25 * (Math.sin(simT * 0.7) * 0.5 + Math.sin(simT * 1.9 + 1) * 0.3 + Math.sin(simT * 0.23) * 0.2); F.env.gustFactor = gust;
     physics(dt);
     sim.atc.update(sim, dt * sim.simRate);
-    if (sim.atc.log.length !== atcSeen) { atcSeen = sim.atc.log.length; if ($('atcPanel').classList.contains('hidden')) sim.atcMsg = true; }
+    sim.tower?.update(sim, dt * sim.simRate);
+    { const l0 = sim.atc.log[0]; if (l0 && l0.id !== atcSeen) { atcSeen = l0.id; if (!l0.ai && $('atcPanel').classList.contains('hidden')) sim.atcMsg = true; } }
     updateTaxiGuide(dt);
     simT += dt * sim.simRate; sim.timeOfDay = (lastSetup?.tod ?? 10) + simT / 3600;
     if (F.crashed && !sim.crashShown) { sim.crashShown = true; $('crashWhy').textContent = F.crashed; $('crash').classList.remove('hidden'); }
