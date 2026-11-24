@@ -308,18 +308,105 @@ function tank(mb, x0, x1, cy, ry, rz, mat) {
 }
 function handrails(mb, x0, x1, y, z, mat) { const m = mats(); mb.add(cylX(0.022, x1 - x0, 8), mat || m.paint(0xf2b705), [(x0 + x1) / 2, y, z]); for (let x = x0; x <= x1 + 0.01; x += (x1 - x0) / Math.max(1, Math.round((x1 - x0) / 1.2))) mb.add(cylY(0.02, 0.5, 6), mat || m.paint(0xf2b705), [x, y - 0.25, z]); }
 
+
+// ------------------------------------------------------------------ who runs the ramp at each field
+// Researched per airport (AirNav / AOPA FBO listings, airport fuel-system documents, ramp photos on Wikimedia Commons):
+//  - SFO, OAK and SJC fuel airliners from hydrant pits, so the gates get hydrant dispensers rather than tankers.
+//    SFO's system is run by ASI (Menzies Aviation); Swissport does into-plane fuelling at OAK and SJC.
+//  - United's SFO ramp runs white Charlatte electric tractors and white/orange Goldhofer tugs; Swissport handles
+//    other carriers (white belt loaders with yellow rails); Southwest paints its GSE Bold Blue, uses Charlatte T137
+//    tractors at OAK and LEKTRO electric towbarless tugs at SJC; a TLD stainless potable-water truck works the gates.
+//  - GA line service is the field's FBO: Signature (SFO), KaiserAir (OAK), Atlantic (SJC), APP Jet Center (HWD),
+//    Rabbit Aviation / Avfuel (SQL), Rossi Aircraft / Titan (PAO), Five Rivers (LVK), Pacific States (CCR),
+//    Skyservice (APC), San Jose Fuel Co. (RHV), City of Petaluma / Titan (O69), San Mateo County (HAF),
+//    SkyShare (DVO), Avports (NUQ, Jet A only).
+const FBO_DEF = { name: 'AIRPORT FUEL', sub: 'LINE SERVICE', body: 0xf1f2ef, ink: '#0d3a73', band: '#c8102e', stripe: '#0d3a73', brand: null, tug: 0xc21f1f, num: 'FUEL 7' };
+const PROFILES = {
+  KSFO: { iata: 'SFO', hydrant: true, into: { name: 'menzies', ink: '#272a6b', accent: '#e5007d', sub: 'AVIATION · INTO-PLANE FUELLING' }, handler: 'SWP', caterer: 'GG',
+    fbo: { name: 'SIGNATURE', sub: 'SIGNATURE AVIATION · SFO', body: 0xf3f4f2, ink: '#0b2341', band: '#c8102e', stripe: '#0b2341', tug: 0x0b2341, num: 'SFS 12' } },
+  KOAK: { iata: 'OAK', hydrant: true, into: { name: 'swissport', ink: '#e3001b', accent: '#1c2a4d', sub: 'FUELLING' }, handler: 'SWP', caterer: 'GG',
+    fbo: { name: 'KaiserAir', sub: 'OAKLAND · SINCE 1946', body: 0xf2f3f1, ink: '#123a7a', band: '#c8102e', stripe: '#123a7a', tug: 0x123a7a, num: 'KA 4', italic: true } },
+  KSJC: { iata: 'SJC', hydrant: true, into: { name: 'swissport', ink: '#e3001b', accent: '#1c2a4d', sub: 'FUELLING' }, handler: null, caterer: 'GG',
+    fbo: { name: 'ATLANTIC', sub: 'ATLANTIC AVIATION · SJC', body: 0xf2f3f1, ink: '#002b5c', band: '#c8102e', stripe: '#3d8fd1', tug: 0x002b5c, num: 'AA 21' } },
+  KHWD: { iata: 'HWD', fbo: { name: 'APP JET CENTER', sub: 'HAYWARD EXECUTIVE', body: 0xf2f3f1, ink: '#1a3f6f', band: '#c8102e', stripe: '#8a9199', tug: 0x1a3f6f, num: 'APP 3' } },
+  KSQL: { iata: 'SQL', fbo: { name: 'RABBIT AVIATION', sub: 'SAN CARLOS', body: 0xf2f3f1, ink: '#13306b', band: '#c8102e', stripe: '#c8102e', brand: 'AVFUEL', tug: 0xc21f1f, num: 'R-2' } },
+  KPAO: { iata: 'PAO', fbo: { name: 'ROSSI AIRCRAFT', sub: 'PALO ALTO', body: 0xf2f3f1, ink: '#0e3b6e', band: '#c8102e', stripe: '#e05a24', brand: 'TITAN', tug: 0xc21f1f, num: 'RA 1' } },
+  KLVK: { iata: 'LVK', fbo: { name: 'FIVE RIVERS AVIATION', sub: 'LIVERMORE', body: 0xf2f3f1, ink: '#1b4a3a', band: '#c8102e', stripe: '#2f7d5b', tug: 0x1b4a3a, num: 'FR 5' } },
+  KCCR: { iata: 'CCR', fbo: { name: 'PACIFIC STATES', sub: 'AVIATION · CONCORD', body: 0xf2f3f1, ink: '#0f3a68', band: '#c8102e', stripe: '#d4a017', tug: 0x0f3a68, num: 'PSA 2' } },
+  KAPC: { iata: 'APC', fbo: { name: 'SKYSERVICE', sub: 'NAPA FBO', body: 0x2b2f36, ink: '#ffffff', band: '#c8102e', stripe: '#c9a35a', tug: 0x2b2f36, num: 'SKY 7', dark: true } },
+  KRHV: { iata: 'RHV', fbo: { name: 'SAN JOSE FUEL CO.', sub: 'REID-HILLVIEW', body: 0xf2f3f1, ink: '#1a3a6e', band: '#c8102e', stripe: '#1a3a6e', tug: 0xc21f1f, num: 'SJF 1' } },
+  KO69: { iata: 'O69', fbo: { name: 'CITY OF PETALUMA', sub: 'PETALUMA MUNICIPAL AIRPORT', body: 0xf2f3f1, ink: '#0e3b6e', band: '#c8102e', stripe: '#e05a24', brand: 'TITAN', tug: 0xc21f1f, num: 'O69 1' } },
+  KHAF: { iata: 'HAF', fbo: { name: 'SAN MATEO COUNTY', sub: 'HALF MOON BAY AIRPORT', body: 0xf2f3f1, ink: '#1c4d33', band: '#c8102e', stripe: '#1c4d33', tug: 0xc21f1f, num: 'HAF 1' } },
+  KDVO: { iata: 'DVO', fbo: { name: 'SKYSHARE', sub: 'GNOSS FIELD · NOVATO', body: 0xf2f3f1, ink: '#0b4f8a', band: '#c8102e', stripe: '#59a5d8', tug: 0x0b4f8a, num: 'SS 2' } },
+  KNUQ: { iata: 'NUQ', noAvgas: true, fbo: { name: 'AVPORTS', sub: 'MOFFETT FIELD', body: 0xf2f3f1, ink: '#14284b', band: '#111111', stripe: '#c8102e', tug: 0x14284b, num: 'AVP 3' } },
+};
+// airline / handler GSE liveries (keyed by airline code or handler id)
+const RAMP = {
+  UAL: { id: 'UAL', name: 'UNITED', body: 0xf3f4f2, ink: '#0c2340', accent: '#1b5fbd', tugStyle: 'goldhofer', tractor: 'charlatte' },
+  SWA: { id: 'SWA', name: 'SOUTHWEST', body: 0x304cb2, ink: '#ffffff', accent: '#e31837', accent2: '#ffbf27', tugStyle: 'tld', tractor: 'charlatte', dark: true },
+  SWP: { id: 'SWP', name: 'swissport', body: 0xf3f4f2, ink: '#e3001b', accent: '#1c2a4d', tugStyle: 'tld', tractor: 'tld', small: true },
+  GEN: { id: 'GEN', name: '', body: 0xf2b705, ink: '#151515', accent: '#151515', tugStyle: 'tld', tractor: 'tld' },
+};
+const DEFAULT_PROFILE = { id: '', iata: '', fbo: FBO_DEF, into: null, handler: null, caterer: null };
+let PROF = DEFAULT_PROFILE;
+export function gseProfile(icao) { const p = PROFILES[icao]; if (!p) return DEFAULT_PROFILE; return { id: icao, into: null, handler: null, caterer: null, ...p, fbo: { ...FBO_DEF, ...p.fbo } }; }
+// build GSE in the livery of the airport (FBO, fuel company, handler); prototypes are cached per airport
+export function withGSEAirport(icao, fn) { const o = PROF; PROF = gseProfile(icao); try { return fn(); } finally { PROF = o; } }
+// equipment that serves an airliner of airline `lv` at the current airport
+function rampFor(lv) {
+  if (lv === 'UAL' && PROF.id === 'KSFO') return RAMP.UAL; // United's hub ramp
+  if (lv === 'SWA' && (PROF.id === 'KOAK' || PROF.id === 'KSJC')) return RAMP.SWA; // Southwest self-handles its Bay Area stations
+  return PROF.handler ? RAMP[PROF.handler] : RAMP.GEN;
+}
+const hex = (n) => '#' + n.toString(16).padStart(6, '0');
+// wordmark decal: big name, optional small line underneath
+function wordmark(name, { ink = '#0d3a73', sub = null, subInk = null, italic = false, px = 84, weight = 800, lower = false } = {}) {
+  return (g, w, h) => {
+    g.fillStyle = ink; g.textAlign = 'center'; g.textBaseline = 'middle';
+    const top = sub ? h * 0.4 : h / 2; g.font = (italic ? 'italic ' : '') + font(weight, px); const m = g.measureText(name).width; const sx = Math.min(1, (w - 16) / m);
+    g.save(); g.translate(w / 2, top); g.scale(sx, 1); g.fillText(lower ? name : name, 0, 0); g.restore();
+    if (sub) { g.fillStyle = subInk || ink; g.font = font(600, px * 0.34); const m2 = g.measureText(sub).width; const s2 = Math.min(1, (w - 16) / m2); g.save(); g.translate(w / 2, h * 0.82); g.scale(s2, 1); g.fillText(sub, 0, 0); g.restore(); }
+  };
+}
+// Southwest heart (Bold Blue / Warm Red / Sunrise Yellow)
+function swHeart() {
+  return (g, w, h) => {
+    const cols = ['#304cb2', '#e31837', '#ffbf27']; const cx = w / 2, cy = h / 2 + h * 0.05, r = Math.min(w, h) * 0.42;
+    g.save(); g.beginPath(); g.moveTo(cx, cy + r); g.bezierCurveTo(cx - r * 1.6, cy - r * 0.2, cx - r * 0.7, cy - r * 1.3, cx, cy - r * 0.45); g.bezierCurveTo(cx + r * 0.7, cy - r * 1.3, cx + r * 1.6, cy - r * 0.2, cx, cy + r); g.closePath(); g.clip();
+    g.fillStyle = cols[1]; g.fillRect(0, 0, w, h); g.fillStyle = cols[0]; g.fillRect(0, 0, w, cy - r * 0.25); g.fillStyle = cols[2]; g.fillRect(0, cy + r * 0.4, w, h); g.restore();
+    g.strokeStyle = '#fff'; g.lineWidth = 4; g.beginPath(); g.moveTo(cx, cy + r); g.bezierCurveTo(cx - r * 1.6, cy - r * 0.2, cx - r * 0.7, cy - r * 1.3, cx, cy - r * 0.45); g.bezierCurveTo(cx + r * 0.7, cy - r * 1.3, cx + r * 1.6, cy - r * 0.2, cx, cy + r); g.stroke();
+  };
+}
+// United globe-style mark (simplified meridian lines on a blue disc)
+function uaGlobe() {
+  return (g, w, h) => {
+    const cx = w / 2, cy = h / 2, r = Math.min(w, h) * 0.46; g.fillStyle = '#0c2340'; g.beginPath(); g.arc(cx, cy, r, 0, TAU); g.fill();
+    g.strokeStyle = '#7fa7dd'; g.lineWidth = r * 0.09; for (let k = -3; k <= 3; k++) { g.beginPath(); g.ellipse(cx, cy, Math.abs(k) * r * 0.3 + 0.01, r * 0.97, 0, 0, TAU); g.stroke(); }
+  };
+}
+function rampMark(A, rp, w = 640, h = 110) {
+  if (rp.id === 'SWA') return A.add(w, h, wordmark('SOUTHWEST', { ink: '#ffffff', px: 78 }));
+  if (rp.id === 'UAL') return A.add(w, h, wordmark('UNITED', { ink: '#0c2340', px: 82 }));
+  if (rp.id === 'SWP') return A.add(w, h, wordmark('swissport', { ink: '#e3001b', px: 80, weight: 700 }));
+  return null;
+}
+
 // ------------------------------------------------------------------ vehicles
 const PROTO = new Map();
-function proto(key, fn) { key = LOD + key; if (!PROTO.has(key)) PROTO.set(key, fn()); const p = PROTO.get(key); const o = p.clone(); o.userData = { ...p.userData }; return o; }
+function proto(key, fn) { key = LOD + PROF.id + key; if (!PROTO.has(key)) PROTO.set(key, fn()); const p = PROTO.get(key); const o = p.clone(); o.userData = { ...p.userData }; return o; }
 
 // GA refueler: 1,200 gal 100LL truck on a medium-duty chassis (Garsite / Rampmaster style)
 function avgasTruckProto() {
-  const m = mats(), mb = new MB(), A = new Atlas(1024, 512);
-  const white = m.paint(0xf1f2ef), red = m.paint(0xb51f24);
+  const m = mats(), mb = new MB(), A = new Atlas(1024, 512); const F = PROF.fbo;
+  const white = m.paint(F.body), red = m.paint(0xb51f24), trim = m.paint(parseInt(F.stripe.slice(1), 16));
   chassisRails(mb, -3.7, 3.1, 0.72, 0.86);
   cabHood(mb, { x0: 1.05, xc: 2.65, x1: 3.75, w: 2.3, y0: 0.95, y1: 2.62, yh: 1.82, paint: white, wheelR: 0.5 });
-  mb.add(box(1.4, 0.06, 2.32), red, [1.8, 1.5, 0]);
+  mb.add(box(1.4, 0.06, 2.32), trim, [1.8, 1.5, 0]);
   const t = tank(mb, -3.45, 0.85, 1.86, 0.78, 1.04, m.alu);
+  // bottom-loading adaptor, API coupler and filter/separator vessel in the rear cabinet; fire extinguisher by the cab
+  mb.add(cylY(0.17, 0.7, 18), m.brushed, [-3.55, 1.25, 0.72]); mb.add(cylY(0.19, 0.06, 18), m.chrome, [-3.55, 1.62, 0.72]);
+  mb.add(cylX(0.07, 0.3, 10), m.chassis, [-3.3, 0.95, -0.9]); mb.add(cylY(0.09, 0.5, 14), red, [0.95, 1.25, 1.12]);
+  for (let x = -3.2; x < 0.7; x += 0.55) for (const s of [-1, 1]) mb.add(box(0.05, 0.05, 0.05), m.chrome, [x, 1.86, s * 1.045]);
   mb.add(box(4.0, 0.12, 1.9), m.chassis, [-1.3, 1.05, 0]);
   for (let x = -3.0; x < 0.8; x += 1.05) mb.add(box(0.12, 0.2, 2.05), m.chassis, [x, 1.0, 0]);
   // top: manholes, vents, fold-down rail
@@ -340,25 +427,26 @@ function avgasTruckProto() {
   beaconLight(mb, 2.0, 2.62, 0);
   // decals: grade band, name, hazmat, no-smoking, conspicuity tape
   const band = A.add(512, 80, textDecal('AVGAS 100LL', { bg: '#c8102e', color: '#fff', px: 62 }));
-  const name = A.add(512, 96, textDecal('BAY AVIATION FUEL', { color: '#0d3a73', px: 64, italic: true }));
+  const name = A.add(512, 112, wordmark(F.name, { ink: F.brand ? F.ink : F.ink, sub: F.brand ? F.brand + ' · ' + F.sub : F.sub, px: 66, italic: !!F.italic }));
   const haz = A.add(160, 160, hazmatDiamond('1203'));
   const nos = A.add(320, 64, textDecal('NO SMOKING WITHIN 50 FT', { color: '#c8102e', bg: '#fff', px: 34 }));
   const flam = A.add(256, 64, textDecal('FLAMMABLE', { color: '#fff', bg: '#c8102e', px: 44 }));
-  const door = A.add(256, 96, textDecal('FUEL 7', { color: '#0d3a73', px: 70 }));
+  const door = A.add(256, 96, wordmark(F.name, { ink: F.ink, sub: F.num, px: 44 }));
   const tape = A.add(512, 24, conspicuity());
+  const sideNo = A.add(256, 64, textDecal(F.num, { color: F.ink, px: 44 }));
   for (const s of [-1, 1]) {
     const z = s * 1.045;
-    decal(mb, A, band, 2.4, 0.38, -1.3, 1.95, z, s); decal(mb, A, name, 2.6, 0.46, -1.3, 2.38, z * 0.985, s);
-    decal(mb, A, haz, 0.4, 0.4, -3.05, 1.6, z * 0.94, s); decal(mb, A, nos, 1.6, 0.22, -1.3, 1.45, z * 0.94, s);
-    decal(mb, A, door, 0.9, 0.33, 1.85, 1.95, s * 1.152, s); decal(mb, A, tape, 4.2, 0.08, -1.3, 1.2, s * 1.115, s);
+    decal(mb, A, band, 2.4, 0.24, -1.3, 2.2, s * 0.95, s); decal(mb, A, name, 2.7, 0.52, -1.3, 1.8, s * 1.05, s); decal(mb, A, sideNo, 0.7, 0.18, -3.96, 2.05, s * 1.152, s);
+    decal(mb, A, haz, 0.4, 0.4, -3.05, 1.6, z * 0.94, s); decal(mb, A, nos, 1.4, 0.16, -1.3, 1.42, s * 0.87, s);
+    decal(mb, A, door, 0.95, 0.36, 1.85, 1.95, s * 1.152, s); decal(mb, A, tape, 4.2, 0.08, -1.3, 1.2, s * 1.115, s);
   }
   decal(mb, A, flam, 1.1, 0.27, -4.31, 2.05, 0, 'b'); decal(mb, A, haz, 0.4, 0.4, -4.31, 1.0, -0.6, 'b');
   const g = mb.build(); g.userData = { kind: 'avgas', len: 8.2, wid: 2.4, hoseAt: V3(-4.05, 1.55, -0.65) }; return g;
 }
 // airport Jet A refueler (10,000 gal, tandem axle)
 function jetTruckProto() {
-  const m = mats(), mb = new MB(), A = new Atlas(1024, 512);
-  const white = m.paint(0xf3f3f0), blue = m.paint(0x123f7a);
+  const m = mats(), mb = new MB(), A = new Atlas(1024, 512); const F = PROF.fbo, I = PROF.into;
+  const ink = I ? I.ink : F.ink; const white = m.paint(0xf3f3f0), blue = m.paint(parseInt(ink.slice(1), 16));
   chassisRails(mb, -5.6, 4.4, 0.8, 0.9);
   cabOver(mb, { x0: 3.4, x1: 5.25, w: 2.5, y0: 1.05, y1: 3.15, paint: white });
   mb.add(box(1.86, 0.1, 2.52), blue, [4.32, 1.8, 0]);
@@ -375,25 +463,28 @@ function jetTruckProto() {
   for (const s of [-1, 1]) mb.add(rbox(0.06, 0.12, 0.22, 0.02), m.tail, [-5.72, 1.0, s * 1.05]);
   beaconLight(mb, 4.4, 3.15, 0);
   const band = A.add(512, 80, textDecal('JET A', { bg: '#111', color: '#fff', px: 64 }));
-  const name = A.add(640, 110, textDecal('BAY AVIATION FUEL', { color: '#123f7a', px: 76, italic: true }));
+  const name = A.add(640, 130, wordmark(I ? I.name : F.name, { ink, sub: I ? I.sub : F.sub, px: 80, weight: I ? 700 : 800 }));
   const haz = A.add(160, 160, hazmatDiamond('1863'));
   const nos = A.add(360, 64, textDecal('NO SMOKING WITHIN 50 FT', { color: '#c8102e', bg: '#fff', px: 36 }));
   const flam = A.add(256, 64, textDecal('FLAMMABLE', { color: '#fff', bg: '#c8102e', px: 44 }));
-  const num = A.add(256, 96, textDecal('F-14', { color: '#123f7a', px: 74 }));
+  const num = A.add(256, 96, textDecal((PROF.iata || 'F') + '-14', { color: ink, px: 74 }));
   const tape = A.add(512, 24, conspicuity());
   for (const s of [-1, 1]) {
     const z = s * 1.245;
-    decal(mb, A, band, 2.2, 0.4, -1.2, 2.05, z, s); decal(mb, A, name, 4.0, 0.7, -1.2, 2.75, z * 0.97, s);
-    decal(mb, A, haz, 0.5, 0.5, -4.6, 1.85, z * 0.92, s); decal(mb, A, nos, 2.2, 0.26, -1.2, 1.62, z * 0.95, s);
+    decal(mb, A, band, 2.0, 0.34, -1.2, 1.82, s * 1.2, s); decal(mb, A, name, 3.6, 0.64, -1.2, 2.5, s * 1.21, s);
+    decal(mb, A, haz, 0.5, 0.5, -4.6, 2.1, s * 1.25, s); decal(mb, A, nos, 1.8, 0.2, -1.2, 1.42, s * 0.9, s);
     decal(mb, A, num, 0.8, 0.3, 4.3, 2.55, s * 1.252, s); decal(mb, A, tape, 9.0, 0.09, -0.5, 1.33, s * 1.315, s);
   }
   decal(mb, A, flam, 1.2, 0.3, -5.61, 2.6, 0, 'b'); decal(mb, A, haz, 0.5, 0.5, -5.61, 1.5, 0, 'b');
   const g = mb.build(); g.userData = { kind: 'jet', len: 11.2, wid: 2.6, hoseAt: V3(2.85, 1.95, 1.0) }; return g;
 }
 // high-lift catering truck: cab, scissor lift, insulated box with front bridge platform (animated: setLift)
-function cateringTruckProto() {
+function cateringTruckProto(lv) {
   const m = mats(), mb = new MB(), A = new Atlas(1024, 512);
-  const white = m.paint(0xf4f4f2), navy = m.paint(0x13284a), yel = m.paint(0xf2b705);
+  // who caters this flight: Southwest provisions its own aircraft; at SFO United is catered by LSG Sky Chefs, most others by gategourmet
+  const cat = lv === 'SWA' && (PROF.id === 'KOAK' || PROF.id === 'KSJC' || PROF.id === 'KSFO') ? 'SWA' : PROF.id === 'KSFO' ? (lv === 'UAL' ? 'LSG' : 'GG') : PROF.caterer ? 'GEN' : 'GEN';
+  const C = { SWA: { box: 0x304cb2, trim: 0x1d2f74, ink: '#ffffff' }, LSG: { box: 0xf4f4f2, trim: 0x00205b, ink: '#00205b' }, GG: { box: 0xf4f4f2, trim: 0x002d62, ink: '#002d62' }, GEN: { box: 0xf4f4f2, trim: 0x13284a, ink: '#13284a' } }[cat];
+  const white = m.paint(0xf4f4f2), navy = m.paint(C.trim), yel = m.paint(0xf2b705), boxP = m.paint(C.box);
   chassisRails(mb, -4.6, 3.0, 0.8, 0.9);
   cabOver(mb, { x0: 2.85, x1: 4.45, w: 2.45, y0: 1.0, y1: 2.85, paint: white });
   mb.add(box(4.6, 0.3, 2.35), m.chassis, [-1.6, 1.12, 0]);
@@ -404,18 +495,19 @@ function cateringTruckProto() {
   const base = mb.build();
   // lift box (local y = 0 at the box floor)
   const bx = new MB();
-  bx.add(rbox(6.6, 2.45, 2.5, 0.05), white, [-1.2, 1.28, 0]);
+  bx.add(rbox(6.6, 2.45, 2.5, 0.05), boxP, [-1.2, 1.28, 0]);
   bx.add(box(6.64, 0.16, 2.54), navy, [-1.2, 0.1, 0]);
-  for (let x = -4.3; x < 1.9; x += 0.155) for (const s of [-1, 1]) bx.add(box(0.02, 1.9, 0.004), m.paint(0xdfe0de), [x, 1.3, s * 1.252]); // roll-shutter ribs
+  for (let x = -4.3; x < 1.9; x += 0.155) for (const s of [-1, 1]) bx.add(box(0.02, 1.9, 0.004), m.paint(cat === 'SWA' ? 0x2a43a0 : 0xdfe0de), [x, 1.3, s * 1.252]); // roll-shutter ribs
   bx.add(box(3.7, 0.06, 2.4), m.plate, [3.95, 0.03, 0]);
   for (const s of [-1, 1]) { bx.add(cylX(0.03, 3.6, 8), yel, [3.95, 1.05, s * 1.15]); for (let x = 2.3; x <= 5.7; x += 0.85) bx.add(cylY(0.028, 1.05, 6), yel, [x, 0.53, s * 1.15]); }
   bx.add(box(0.16, 0.18, 2.6), m.plastic, [5.85, 0.1, 0]);
   bx.add(rbox(0.1, 2.1, 1.1, 0.03), m.brushed, [2.1, 1.1, 0]);
   bx.add(box(0.12, 0.2, 2.5), m.hazard, [5.8, 0.25, 0]);
-  const brand = A.add(640, 128, (g, w, h) => { g.fillStyle = '#13284a'; g.font = font(800, 78); g.textBaseline = 'middle'; g.fillText('BAY', 18, h / 2); g.fillStyle = '#d4a017'; g.font = 'italic ' + font(700, 72); g.fillText('SkyChef', 200, h / 2 + 2); });
-  const tag = A.add(512, 64, textDecal('IN-FLIGHT CATERING · SFO · OAK · SJC', { color: '#13284a', px: 34, weight: 600 }));
-  const hl = A.add(256, 64, textDecal('HIGH LOADER', { color: '#fff', bg: '#13284a', px: 38 }));
-  for (const s of [-1, 1]) { decal(bx, A, brand, 3.8, 0.76, -1.2, 1.75, s * 1.252, s); decal(bx, A, tag, 3.6, 0.36, -1.2, 0.95, s * 1.256, s); }
+  const brand = A.add(640, 128, cat === 'SWA' ? wordmark('SOUTHWEST', { ink: '#ffffff', px: 84 }) : cat === 'LSG' ? wordmark('LSG SKY CHEFS', { ink: C.ink, px: 76 }) : cat === 'GG' ? wordmark('gategourmet', { ink: C.ink, px: 86, weight: 700 }) : wordmark('IN-FLIGHT CATERING', { ink: C.ink, px: 64 }));
+  const tag = A.add(512, 64, textDecal(cat === 'SWA' ? 'PROVISIONING' : cat === 'GEN' ? 'AIRLINE CATERING' : 'AIRLINE CATERING · ' + PROF.iata, { color: C.ink, px: 34, weight: 600 }));
+  const hl = A.add(256, 64, textDecal('HIGH LOADER', { color: '#fff', bg: hex(C.trim), px: 38 }));
+  const heart = cat === 'SWA' ? A.add(128, 128, swHeart()) : null;
+  for (const s of [-1, 1]) { decal(bx, A, brand, 3.8, 0.76, -1.2, 1.75, s * 1.252, s); decal(bx, A, tag, 3.6, 0.36, -1.2, 0.95, s * 1.256, s); if (heart) decal(bx, A, heart, 0.8, 0.8, s * 1.75 - 1.2, 1.75, s * 1.254, s); }
   decal(bx, A, hl, 1.4, 0.35, -4.51, 2.2, 0, 'b');
   const boxG = bx.build();
   // scissor: two crossed beams per side (rotated about Z by setLift)
@@ -434,7 +526,8 @@ function cateringTruckProto() {
   return g;
 }
 // small catering / FBO service van (Transit-style high roof)
-function vanProto(label = 'FBO CATERING', color = 0xf4f4f2, accent = '#0e5c8f') {
+function vanProto(label = null, color = null, accent = null) {
+  const F = PROF.fbo; label = label ?? F.name; color = color ?? (F.dark ? F.body : 0xf4f4f2); accent = accent ?? (F.dark ? '#ffffff' : F.ink);
   const m = mats(), mb = new MB(), A = new Atlas(1024, 256);
   const paint = m.paint(color); const W = 2.05;
   const prof = [[-2.75, 0.42], [2.55, 0.42], [2.72, 0.62], [2.72, 0.98], [2.25, 1.25], [1.45, 2.05], [1.15, 2.52], [-2.72, 2.55], [-2.78, 2.35], [-2.78, 0.6]];
@@ -454,33 +547,47 @@ function vanProto(label = 'FBO CATERING', color = 0xf4f4f2, accent = '#0e5c8f') 
   mirrors(mb, 1.25, 1.7, W);
   wheel(mb, 1.7, 0.86, 0.36, 0.24); wheel(mb, 1.7, -0.86, 0.36, 0.24); wheel(mb, -1.75, 0.86, 0.36, 0.24); wheel(mb, -1.75, -0.86, 0.36, 0.24);
   beaconLight(mb, 0.4, 2.58, 0, 0.08);
-  const t = A.add(768, 110, textDecal(label, { color: accent, px: 80, italic: true }));
-  const s2 = A.add(512, 64, textDecal('RAMP SERVICES', { color: '#555', px: 40, weight: 600 }));
-  const stripe = A.add(1000, 40, (g, w, h) => { g.fillStyle = accent; g.fillRect(0, 0, w, h); });
+  const t = A.add(768, 110, textDecal(label, { color: accent, px: 80, italic: !!F.italic }));
+  const s2 = A.add(512, 64, textDecal(F.sub + ' · LINE SERVICE', { color: F.dark ? '#d8d8d8' : '#555', px: 40, weight: 600 }));
+  const stripe = A.add(1000, 40, (g, w, h) => { g.fillStyle = F.stripe; g.fillRect(0, 0, w, h); });
   for (const s of [-1, 1]) { decal(mb, A, t, 2.9, 0.42, -0.7, 1.85, s * (W / 2 + 0.06), s); decal(mb, A, s2, 1.6, 0.2, -0.7, 1.5, s * (W / 2 + 0.06), s); decal(mb, A, stripe, 5.3, 0.12, 0, 1.05, s * (W / 2 + 0.065), s); }
   const g = mb.build(); g.userData = { kind: 'van', len: 5.6, wid: 2.2 }; return g;
 }
 // conventional airliner tug (TLD / Goldhofer style) with towbar
-function tugProto() {
-  const m = mats(), mb = new MB(), A = new Atlas(512, 256);
-  const body = m.paint(0xe8a317, { rough: 0.45 });
+function tugProto(lv) {
+  const rp = rampFor(lv);
+  if (rp.id === 'SWA' && PROF.id === 'KSJC') return lektroProto();
+  const m = mats(), mb = new MB(), A = new Atlas(512, 512);
+  const gold = rp.tugStyle === 'goldhofer';
+  const body = m.paint(rp.id === 'GEN' || rp.id === 'SWP' ? 0xe8a317 : rp.body, { rough: 0.45 });
+  if (gold) { // United SFO: white Goldhofer with orange bands, black/yellow bumpers, big fleet number
+    const band = A.add(512, 64, (g, w, h) => { g.fillStyle = '#f26a1b'; g.fillRect(0, 0, w, h); g.fillStyle = '#f3f4f2'; g.fillRect(0, h * 0.42, w, h * 0.16); });
+    const no = A.add(128, 128, textDecal('2', { color: '#fff', bg: '#f26a1b', px: 110 }));
+    const gh = A.add(256, 64, textDecal('Goldhofer', { color: '#151515', px: 44, weight: 700 }));
+    for (const s of [-1, 1]) { decal(mb, A, band, 6.2, 0.42, 0, 0.98, s * 1.353, s); decal(mb, A, no, 0.5, 0.5, 0.3, 1.0, s * 1.356, s); }
+    decal(mb, A, gh, 0.9, 0.22, 2.21, 2.5, -0.45, 'f');
+    for (const x of [3.26, -3.26]) mb.add(box(0.06, 0.24, 2.6), m.hazard, [x, 0.52, 0]);
+  }
   mb.add(rbox(6.4, 1.05, 2.7, 0.14, 3), body, [0, 0.95, 0]);
   mb.add(rbox(6.5, 0.18, 2.8, 0.06), m.plastic, [0, 0.42, 0]);
   for (const x of [3.22, -3.22]) mb.add(box(0.12, 0.3, 2.5), m.hazard, [x * 1.003, 0.95, 0]);
   // raised cab front-left
   mb.add(rbox(1.7, 0.18, 1.6, 0.04), m.chassis, [1.4, 1.56, -0.45]);
   for (const sx of [0.62, 2.18]) for (const sz of [-1.2, 0.3]) mb.add(box(0.07, 1.05, 0.07), m.chassis, [sx, 2.1, sz]);
-  mb.add(rbox(1.7, 0.1, 1.6, 0.04), m.chassis, [1.4, 2.65, -0.45]);
-  mb.add(box(0.02, 0.98, 1.44), m.glass, [2.2, 2.1, -0.45]); mb.add(box(0.02, 0.98, 1.44), m.glass, [0.6, 2.1, -0.45]);
-  mb.add(box(1.5, 0.98, 0.02), m.glass, [1.4, 2.1, -1.24]); mb.add(box(1.5, 0.98, 0.02), m.glass, [1.4, 2.1, 0.34]);
+  mb.add(rbox(1.76, 0.12, 1.66, 0.05), body, [1.4, 2.66, -0.45]);
+  // lower door / dash panels in body colour, glazing above (as on the SFO Goldhofer cabs)
+  mb.add(box(0.04, 0.42, 1.44), body, [2.2, 1.86, -0.45]); mb.add(box(0.04, 0.42, 1.44), body, [0.6, 1.86, -0.45]);
+  mb.add(box(1.5, 0.42, 0.04), body, [1.4, 1.86, -1.24]); mb.add(box(1.5, 0.42, 0.04), body, [1.4, 1.86, 0.34]);
+  mb.add(box(0.02, 0.54, 1.44), m.glass, [2.2, 2.34, -0.45]); mb.add(box(0.02, 0.54, 1.44), m.glass, [0.6, 2.34, -0.45]);
+  mb.add(box(1.5, 0.54, 0.02), m.glass, [1.4, 2.34, -1.24]); mb.add(box(1.5, 0.54, 0.02), m.glass, [1.4, 2.34, 0.34]);
   mb.add(rbox(0.5, 0.5, 0.55, 0.06), m.seat, [1.2, 1.85, -0.45]); mb.add(cylY(0.17, 0.03, 16), m.plastic, [1.75, 2.05, -0.45], [0, 0, 0.6]);
   beaconLight(mb, 1.4, 2.7, -0.45, 0.1);
   for (const s of [-1, 1]) { mb.add(rbox(0.05, 0.16, 0.36, 0.03), m.head, [3.24, 1.15, s * 1.05]); mb.add(rbox(0.05, 0.14, 0.2, 0.02), m.tail, [-3.24, 1.15, s * 1.1]); }
   mb.add(box(0.5, 0.25, 0.4), m.chassis, [3.35, 0.7, 0]); mb.add(box(0.5, 0.25, 0.4), m.chassis, [-3.35, 0.7, 0]);
   for (const x of [2.1, -2.1]) for (const s of [-1, 1]) { wheel(mb, x, s * 1.12, 0.58, 0.46); }
   for (const x of [2.1, -2.1]) for (const s of [-1, 1]) mb.add(new THREE.CylinderGeometry(0.66, 0.66, 0.5, 18, 1, true, Math.PI / 2, Math.PI).rotateX(Math.PI / 2), m.plastic, [x, 0.6, s * 1.12]);
-  const t = A.add(512, 96, textDecal('PUSHBACK · TOWING', { color: '#151515', px: 54 }));
-  for (const s of [-1, 1]) decal(mb, A, t, 2.6, 0.4, -1.4, 1.05, s * 1.352, s);
+  const mk = rampMark(A, rp, 512, 96); const t = mk || A.add(512, 96, textDecal('PUSHBACK · TOWING', { color: '#151515', px: 54 }));
+  for (const s of [-1, 1]) decal(mb, A, t, gold ? 1.6 : 2.6, gold ? 0.26 : 0.4, -1.6, gold ? 1.32 : 1.05, s * 1.354, s);
   const base = mb.build();
   const bar = new MB();
   bar.add(cylX(0.08, 5.0, 12), m.paint(0xf2b705), [5.95, 0.62, 0]); bar.add(box(0.5, 0.12, 0.7), m.chassis, [8.35, 0.55, 0]);
@@ -491,10 +598,85 @@ function tugProto() {
   g.userData.setTowbar = (o, on) => { o.children[1].visible = on; };
   return g;
 }
+
+// LEKTRO AP8950-style electric towbarless tug (Southwest, SJC): low battery body, nose-wheel cradle at the front (+X),
+// operator station with a stand-up console at the rear
+function lektroProto() {
+  const m = mats(), mb = new MB(), A = new Atlas(512, 256); const rp = RAMP.SWA;
+  const body = m.paint(rp.body, { rough: 0.42 });
+  mb.add(rbox(4.6, 0.62, 2.3, 0.1, 3), body, [-0.6, 0.62, 0]);
+  for (const s of [-1, 1]) { mb.add(rbox(1.9, 0.12, 0.32, 0.04), m.chassis, [2.4, 0.3, s * 0.72]); mb.add(rbox(1.5, 0.42, 0.22, 0.05), body, [2.2, 0.62, s * 0.9]); }
+  mb.add(box(0.14, 0.36, 1.2), m.chassis, [1.62, 0.45, 0]); mb.add(box(0.06, 0.3, 1.1), m.hazard, [1.56, 0.5, 0]); // cradle back gate
+  mb.add(box(1.5, 0.05, 1.0), m.plate, [2.35, 0.18, 0]); // lift platform under the nose wheel
+  mb.add(rbox(0.9, 0.95, 1.6, 0.06), body, [-2.4, 1.35, 0]); mb.add(box(0.5, 0.06, 1.4), m.plate, [-2.95, 0.95, 0]);
+  mb.add(rbox(0.25, 0.4, 0.7, 0.04), m.plastic, [-2.35, 2.0, 0]); mb.add(cylY(0.15, 0.03, 14), m.plastic, [-2.55, 2.12, 0], [0, 0, 0.9]);
+  for (const s of [-1, 1]) { mb.add(cylY(0.025, 0.7, 6), m.chassis, [-2.95, 1.3, s * 0.65]); mb.add(rbox(0.05, 0.14, 0.3, 0.03), m.head, [1.75, 0.85, s * 1.0]); }
+  mb.add(cylY(0.022, 0.9, 6), m.chassis, [-2.6, 2.3, 0.7]); beaconLight(mb, -2.6, 2.75, 0.7, 0.07);
+  for (const x of [0.9, -1.9]) for (const s of [-1, 1]) wheel(mb, x, s * 1.0, 0.42, 0.34);
+  const mk = rampMark(A, rp, 512, 96); const heart = A.add(128, 128, swHeart()); const lk = A.add(256, 64, textDecal('LEKTRO', { color: '#ffffff', px: 44 }));
+  for (const s of [-1, 1]) { decal(mb, A, mk, 1.9, 0.34, -0.7, 0.66, s * 1.153, s); decal(mb, A, heart, 0.45, 0.45, 0.6, 0.66, s * 1.153, s); decal(mb, A, lk, 0.7, 0.18, -2.4, 1.55, s * 0.803, s); }
+  const g = mb.build(); g.userData = { kind: 'tug', len: 5.4, wid: 2.4, towbarLen: 2.35, towbarless: true }; return g;
+}
+// hydrant dispenser (SFO / OAK / SJC): medium-duty truck with filter/separator vessels, meter, inlet hose to the
+// hydrant pit coupler and an elevating platform with a deck hose to the underwing coupling
+function hydrantProto() {
+  const m = mats(), mb = new MB(), A = new Atlas(1024, 256); const I = PROF.into || { name: 'INTO-PLANE', ink: '#123f7a', sub: 'FUELLING' };
+  const white = m.paint(0xf3f3f0), ink = m.paint(parseInt(I.ink.slice(1), 16)), yel = m.paint(0xf2b705);
+  chassisRails(mb, -3.4, 3.0, 0.72, 0.86);
+  cabHood(mb, { x0: 1.0, xc: 2.6, x1: 3.7, w: 2.3, y0: 0.95, y1: 2.6, yh: 1.8, paint: white, wheelR: 0.48 });
+  mb.add(box(1.5, 0.08, 2.32), ink, [1.8, 1.45, 0]);
+  mb.add(box(4.3, 0.1, 2.3), m.plate, [-1.25, 1.12, 0]); // deck
+  for (const x of [-0.2, 0.45]) { mb.add(cylY(0.3, 1.15, 22), m.brushed, [x, 1.75, -0.55]); mb.add(new THREE.SphereGeometry(0.3, 18, 8, 0, TAU, 0, Math.PI / 2), m.brushed, [x, 2.32, -0.55]); } // filter/separators
+  mb.add(cylX(0.08, 1.2, 10), m.brushed, [0.12, 1.4, -0.55]); mb.add(rbox(0.5, 0.5, 0.35, 0.03), white, [0.2, 1.55, 0.6]); mb.add(box(0.01, 0.3, 0.25), m.glass, [0.2, 1.6, 0.78]);
+  mb.add(cylZ(0.42, 0.55, 22), ink, [-1.2, 1.6, 0.6]); mb.add(cylZ(0.36, 0.45, 22), m.hose, [-1.2, 1.6, 0.6]); // inlet hose reel
+  mb.add(cylZ(0.32, 0.45, 20), ink, [-1.2, 1.5, -0.55]); mb.add(cylZ(0.27, 0.36, 20), m.hose, [-1.2, 1.5, -0.55]); // deck hose reel
+  // elevating platform at the rear
+  const ph = 2.2; for (const s of [-1, 1]) { mb.add(box(0.12, ph - 1.1, 0.12), m.chassis, [-2.5, (ph + 1.1) / 2, s * 0.9]); mb.add(box(0.12, ph - 1.1, 0.12), m.chassis, [-3.3, (ph + 1.1) / 2, s * 0.9]); }
+  mb.add(box(1.2, 0.08, 2.1), m.plate, [-2.9, ph, 0]);
+  for (const s of [-1, 1]) { mb.add(cylX(0.03, 1.2, 8), yel, [-2.9, ph + 1.0, s * 1.02]); for (const x of [-3.45, -2.9, -2.35]) mb.add(cylY(0.025, 1.0, 6), yel, [x, ph + 0.5, s * 1.02]); }
+  mb.add(cylZ(0.03, 2.04, 8), yel, [-3.48, ph + 1.0, 0]); mb.add(rbox(0.12, 0.3, 0.2, 0.02), m.plastic, [-2.4, ph + 1.1, 0.8]); // deadman
+  for (const s of [-1, 1]) { mb.add(box(4.6, 0.1, 0.06), m.reflect, [-1.2, 1.18, s * 1.16]); mb.add(rbox(1.6, 0.08, 0.5, 0.03), m.plastic, [-1.9, 1.05, s * 1.0]); }
+  wheel(mb, 3.15, 0.98, 0.48, 0.3, { rim: m.rimWhite }); wheel(mb, 3.15, -0.98, 0.48, 0.3, { rim: m.rimWhite });
+  wheel(mb, -1.9, 0.82, 0.48, 0.28, { dual: true, rim: m.rimWhite }); wheel(mb, -1.9, -0.82, 0.48, 0.28, { dual: true, rim: m.rimWhite });
+  for (const s of [-1, 1]) mb.add(rbox(0.06, 0.12, 0.2, 0.02), m.tail, [-3.45, 0.95, s * 0.95]);
+  beaconLight(mb, 2.0, 2.6, 0);
+  const name = A.add(512, 128, wordmark(I.name, { ink: I.ink, sub: I.sub, px: 76, weight: 700 }));
+  const tag = A.add(256, 64, textDecal('JET A', { color: '#fff', bg: '#111', px: 46 }));
+  const hz = A.add(128, 128, hazmatDiamond('1863'));
+  const no = A.add(256, 64, textDecal('HD-' + (PROF.iata || '0') + ' 07', { color: I.ink, px: 42 }));
+  for (const s of [-1, 1]) { decal(mb, A, name, 1.5, 0.38, 1.85, 2.02, s * 1.152, s); decal(mb, A, tag, 0.7, 0.18, 0.2, 1.3, s * 1.16, s); decal(mb, A, no, 0.9, 0.22, 1.85, 1.62, s * 1.152, s); }
+  decal(mb, A, hz, 0.4, 0.4, -3.41, 1.5, 0, 'b');
+  const g = mb.build(); g.userData = { kind: 'hydrant', len: 7.4, wid: 2.4, hoseAt: V3(-2.9, ph + 0.2, 1.0), inletAt: V3(-1.2, 1.2, 1.15) }; return g;
+}
+// hydrant pit with its yellow-painted lid ring
+function hydrantPitProto() { const m = mats(), mb = new MB(); mb.add(cylY(0.36, 0.04, 20), m.paint(0xf2b705, { rough: 0.7, clear: 0 }), [0, 0.01, 0]); mb.add(cylY(0.26, 0.05, 20), m.chassis, [0, 0.02, 0]); mb.add(cylY(0.1, 0.28, 14), m.brushed, [0, 0.16, 0]); const g = mb.build(); g.userData = { kind: 'pit' }; return g; }
+// TLD WSP-900-style potable water truck (photographed at SFO Terminal 2): stainless tank body, small offset cab, rear work deck
+function waterTruckProto() {
+  const m = mats(), mb = new MB(), A = new Atlas(512, 256); const white = m.paint(0xf1f2f0), grey = m.paint(0x6c7178);
+  mb.add(box(5.2, 0.22, 1.7), m.chassis, [-0.3, 0.62, 0]);
+  mb.add(rbox(3.4, 1.05, 2.0, 0.08, 3), m.brushed, [-1.35, 1.35, 0]); // stainless tank
+  mb.add(cylY(0.25, 0.08, 18), m.chrome, [-1.6, 1.92, 0]); for (const x of [-2.6, -0.4]) mb.add(cylY(0.05, 0.18, 8), m.chrome, [x, 1.95, 0.4]);
+  mb.add(rbox(0.6, 0.8, 1.9, 0.04), m.brushed, [0.75, 1.25, 0]); for (let k = 0; k < 6; k++) mb.add(box(0.5, 0.025, 0.01), m.chassis, [0.75, 1.0 + k * 0.08, 0.955]); // pump bay louvres
+  // cab: white with grey lower panel, forward right
+  mb.add(rbox(1.25, 1.45, 1.35, 0.14, 3), white, [1.95, 1.45, 0.3]); mb.add(rbox(1.27, 0.45, 1.37, 0.08), grey, [1.95, 0.95, 0.3]);
+  mb.add(rbox(0.05, 0.75, 1.1, 0.03), m.glass, [2.58, 1.75, 0.3], [0, 0, 0.12]); for (const s of [-1, 1]) mb.add(rbox(0.7, 0.6, 0.03, 0.02), m.glass, [1.85, 1.75, 0.3 + s * 0.68]);
+  mb.add(rbox(0.3, 0.5, 0.5, 0.04), m.seat, [1.7, 1.3, 0.3]); beaconLight(mb, 1.95, 2.18, 0.3, 0.06);
+  mb.add(box(0.2, 0.22, 2.0), m.hazard, [2.62, 0.62, 0]);
+  // rear deck with railings and a hose
+  mb.add(box(0.7, 0.06, 1.9), m.plate, [-3.4, 0.9, 0]); for (const s of [-1, 1]) mb.add(cylY(0.02, 0.9, 6), m.brushed, [-3.7, 1.35, s * 0.9]); mb.add(cylZ(0.02, 1.8, 6), m.brushed, [-3.7, 1.8, 0]);
+  mb.add(cylZ(0.25, 0.3, 16), m.paint(0x1f5fa8), [-3.3, 1.2, -0.5]);
+  for (const s of [-1, 1]) { wheel(mb, 1.6, s * 0.86, 0.33, 0.22); wheel(mb, -1.9, s * 0.86, 0.33, 0.22); mb.add(rbox(0.05, 0.12, 0.2, 0.02), m.head, [2.62, 0.9, s * 0.75]); }
+  const t = A.add(512, 64, textDecal('DRINKING WATER ONLY', { color: '#1a1a1a', px: 44 }));
+  const tld = A.add(128, 64, textDecal('TLD', { color: '#3a3d42', px: 46 }));
+  const no = A.add(256, 48, textDecal('WT' + (PROF.iata ? PROF.iata.charCodeAt(0) * 41 + 1203 : 47813), { color: '#c8102e', px: 34 }));
+  for (const s of [-1, 1]) { decal(mb, A, t, 1.9, 0.24, -1.35, 1.6, s * 1.004, s); decal(mb, A, tld, 0.35, 0.18, 0.3, 1.25, s * 1.004, s); decal(mb, A, no, 0.6, 0.12, -2.8, 1.55, s * 1.004, s); }
+  decal(mb, A, tld, 0.5, 0.25, 2.62, 1.0, 0.3, 'f');
+  const g = mb.build(); g.userData = { kind: 'water', len: 6.4, wid: 2.1, hoseAt: V3(-3.4, 1.2, 0.9) }; return g;
+}
 // compact GA tug (ride-on electric tug with a nose-wheel cradle at the front)
 function gaTugProto() {
   const m = mats(), mb = new MB(), A = new Atlas(256, 128);
-  const red = m.paint(0xc21f1f, { rough: 0.4 });
+  const red = m.paint(PROF.fbo.tug, { rough: 0.4 });
   mb.add(rbox(1.55, 0.55, 1.05, 0.08, 3), red, [-0.1, 0.5, 0]);
   mb.add(rbox(0.6, 0.45, 0.9, 0.06), m.chassis, [-0.45, 0.95, 0]);
   mb.add(rbox(0.42, 0.12, 0.46, 0.04), m.seat, [-0.5, 1.22, 0]); mb.add(rbox(0.1, 0.42, 0.46, 0.04), m.seat, [-0.75, 1.45, 0]);
@@ -504,7 +686,7 @@ function gaTugProto() {
   mb.add(box(0.12, 0.35, 0.55), m.chassis, [0.68, 0.38, 0]); mb.add(box(0.05, 0.3, 0.45), m.hazard, [0.62, 0.42, 0]);
   mb.add(cylY(0.022, 1.2, 6), m.chassis, [-0.82, 1.3, 0.38]); beaconLight(mb, -0.82, 1.9, 0.38, 0.06);
   for (const s of [-1, 1]) { wheel(mb, 0.35, s * 0.5, 0.22, 0.16); wheel(mb, -0.55, s * 0.5, 0.25, 0.2); mb.add(rbox(0.04, 0.08, 0.16, 0.02), m.head, [0.67, 0.62, s * 0.34]); }
-  const t = A.add(256, 64, textDecal('TOWMASTER', { color: '#fff', px: 40 }));
+  const t = A.add(256, 64, textDecal(PROF.id ? PROF.fbo.name : 'TOWMASTER', { color: '#fff', px: 40 }));
   for (const s of [-1, 1]) decal(mb, A, t, 0.8, 0.2, -0.1, 0.58, s * 0.528, s);
   const g = mb.build(); g.userData = { kind: 'gatug', len: 1.9, wid: 1.1, cradleX: 1.15 }; return g;
 }
@@ -529,7 +711,7 @@ function busProto() {
   for (const x of [5.15, -5.15]) for (const s of [-1, 1]) wheel(mb, x, s * 1.22, 0.44, 0.3, { rim: m.rimSilver });
   for (const sx of [1, -1]) { mb.add(cylY(0.02, 0.4, 6), m.chassis, [sx * (x1 - 0.1), 2.55, 0], [0, 0, 0]); }
   mirrors(mb, x1 + 0.02, 2.4, W + 0.1);
-  const name = A.add(768, 110, textDecal('APRON BUS', { color: '#0f4c8a', px: 84 }));
+  const name = A.add(768, 110, textDecal(PROF.iata ? PROF.iata + ' AIRSIDE' : 'APRON BUS', { color: '#0f4c8a', px: 84 }));
   const sub = A.add(640, 80, textDecal('Passenger transfer · Please hold the handrails', { color: '#465a6e', px: 36, weight: 600 }));
   const num = A.add(256, 128, textDecal('B 23', { color: '#fff', bg: '#0f4c8a', px: 80 }));
   const dest = A.add(512, 96, (g, w, h) => { g.fillStyle = '#0a0a0a'; g.fillRect(0, 0, w, h); g.fillStyle = '#ffb000'; g.font = font(700, 60, 'Share Tech Mono, monospace'); g.textBaseline = 'middle'; g.textAlign = 'center'; g.fillText('REMOTE STAND', w / 2, h / 2); });
@@ -538,9 +720,10 @@ function busProto() {
   const g = mb.build(); g.userData = { kind: 'bus', len: L + 0.3, wid: W + 0.2, doors: [-4.3, 0, 4.3] }; return g;
 }
 // belt loader (conveyor ramp to a cargo door; setBelt sets the top height)
-function beltLoaderProto() {
-  const m = mats(), mb = new MB();
-  const body = m.paint(0xf2f2ef), yel = m.paint(0xf2b705);
+function beltLoaderProto(lv) {
+  const rp = rampFor(lv); const m = mats(), mb = new MB(), A = new Atlas(512, 128);
+  const body = m.paint(rp.id === 'GEN' ? 0xf2f2ef : rp.body), yel = m.paint(0xf2b705);
+  const mk = rampMark(A, rp, 512, 96); if (mk) for (const s of [-1, 1]) decal(mb, A, mk, rp.small ? 0.9 : 1.6, rp.small ? 0.17 : 0.3, 0.6, 0.62, s * 0.955, s);
   mb.add(rbox(6.6, 0.5, 1.9, 0.08), body, [0, 0.62, 0]); mb.add(box(6.7, 0.12, 2.0), m.plastic, [0, 0.36, 0]);
   mb.add(rbox(1.2, 0.8, 0.9, 0.06), body, [-2.4, 1.2, -0.45]); mb.add(rbox(0.5, 0.5, 0.5, 0.06), m.seat, [-2.5, 1.4, -0.45]);
   mb.add(cylY(0.17, 0.03, 16), m.plastic, [-1.95, 1.65, -0.45], [0, 0, 0.6]);
@@ -559,9 +742,12 @@ function beltLoaderProto() {
   g.userData.setBelt(g, 2.0);
   return g;
 }
-function baggageTractorProto() {
-  const m = mats(), mb = new MB();
-  const body = m.paint(0xf2b705, { rough: 0.45 });
+function baggageTractorProto(lv) {
+  const rp = rampFor(lv);
+  if (rp.tractor === 'charlatte') return charlatteProto(rp);
+  const m = mats(), mb = new MB(), A = new Atlas(512, 128);
+  const body = m.paint(rp.id === 'SWP' ? 0xe8e9e6 : 0xf2b705, { rough: 0.45 });
+  const mk = rampMark(A, rp, 512, 96); if (mk) for (const s of [-1, 1]) decal(mb, A, mk, 0.9, 0.17, -0.5, 0.75, s * 0.705, s);
   mb.add(rbox(2.7, 0.7, 1.4, 0.1), body, [0, 0.72, 0]); mb.add(rbox(1.0, 0.5, 1.3, 0.08), body, [0.75, 1.25, 0]);
   mb.add(rbox(0.5, 0.15, 0.5, 0.04), m.seat, [-0.4, 1.2, 0]); mb.add(rbox(0.12, 0.5, 0.5, 0.04), m.seat, [-0.65, 1.45, 0]);
   for (const sx of [0.25, -0.95]) for (const s of [-1, 1]) mb.add(cylY(0.03, 1.2, 6), m.chassis, [sx, 1.7, s * 0.62]);
@@ -570,6 +756,31 @@ function baggageTractorProto() {
   for (const s of [-1, 1]) { wheel(mb, 0.85, s * 0.6, 0.32, 0.22); wheel(mb, -0.85, s * 0.6, 0.32, 0.22); mb.add(rbox(0.04, 0.12, 0.2, 0.02), m.head, [1.36, 1.25, s * 0.45]); }
   mb.add(box(0.3, 0.12, 0.12), m.chassis, [-1.45, 0.45, 0]); beaconLight(mb, -0.35, 2.33, 0, 0.07);
   const g = mb.build(); g.userData = { kind: 'bagtractor', len: 2.9, wid: 1.5 }; return g;
+}
+
+// Charlatte T137 / CFB2000 electric baggage tractor (United at SFO, Southwest at OAK): low body, battery deck with rails
+// behind the seat, flat canopy roof on four posts, windscreen, vinyl side doors
+function charlatteProto(rp) {
+  const m = mats(), mb = new MB(), A = new Atlas(512, 256);
+  const body = m.paint(rp.body, { rough: 0.5, clear: 0.3 }), roof = m.paint(rp.id === 'SWA' ? 0xe8e9ea : 0xeef0ee, { rough: 0.55, clear: 0.2 });
+  mb.add(rbox(3.15, 0.5, 1.32, 0.08), body, [0, 0.6, 0]);
+  mb.add(rbox(0.72, 0.62, 1.3, 0.1), body, [1.17, 1.12, 0]); mb.add(box(0.12, 0.34, 1.36), m.plastic, [1.62, 0.5, 0]);
+  mb.add(rbox(1.25, 0.38, 1.24, 0.05), body, [-0.92, 1.04, 0]); mb.add(box(1.2, 0.03, 1.18), m.plate, [-0.92, 1.24, 0]);
+  for (const s of [-1, 1]) { mb.add(cylX(0.02, 1.2, 6), m.brushed, [-0.95, 1.5, s * 0.57]); for (const x of [-1.5, -0.4]) mb.add(cylY(0.02, 0.28, 6), m.brushed, [x, 1.37, s * 0.57]); }
+  for (const [x, z] of [[1.45, 0.6], [1.45, -0.6], [-0.3, 0.6], [-0.3, -0.6]]) mb.add(box(0.05, 1.12, 0.05), body, [x, 1.68, z]);
+  mb.add(rbox(1.95, 0.09, 1.38, 0.03), roof, [0.58, 2.25, 0]); mb.add(box(0.02, 0.8, 1.15), m.glass, [1.46, 1.82, 0], [0, 0, 0.05]);
+  mb.add(box(0.012, 0.012, 0.5), m.plastic, [1.48, 2.1, 0.2], [0.9, 0, 0]);
+  for (const s of [-1, 1]) mb.add(box(0.75, 0.9, 0.01), m.paint(0xdcdcd6, { rough: 0.8, clear: 0 }), [1.05, 1.62, s * 0.62]); // vinyl doors
+  mb.add(rbox(0.5, 0.14, 0.5, 0.04), m.seat, [0.25, 1.0, 0]); mb.add(rbox(0.1, 0.45, 0.5, 0.04), m.seat, [-0.02, 1.25, 0]);
+  mb.add(cylY(0.17, 0.03, 16), m.plastic, [0.78, 1.45, 0], [0, 0, 0.7]);
+  for (const s of [-1, 1]) { mb.add(rbox(0.04, 0.16, 0.2, 0.02), m.head, [1.54, 1.15, s * 0.46]); mb.add(cylX(0.05, 0.03, 10), m.amber, [1.545, 1.32, s * 0.5]); mb.add(cylX(0.06, 0.02, 10), m.tail, [-1.56, 0.95, s * 0.5]); }
+  for (const s of [-1, 1]) { wheel(mb, 1.0, s * 0.6, 0.3, 0.22); wheel(mb, -1.0, s * 0.6, 0.32, 0.24); }
+  mb.add(box(0.3, 0.12, 0.12), m.chassis, [-1.65, 0.45, 0]); beaconLight(mb, 0.58, 2.3, 0, 0.06);
+  const mk = rampMark(A, rp, 512, 96); const no = A.add(256, 64, textDecal(rp.id === 'UAL' ? 'CT 9816' : 'T137 ' + (PROF.iata || ''), { color: rp.ink, px: 40 }));
+  const plate = A.add(192, 48, textDecal(rp.id === 'UAL' ? 'VC6W53' : 'OAK 52', { color: '#fff', bg: '#c8102e', px: 34 }));
+  for (const s of [-1, 1]) { decal(mb, A, mk, 0.75, 0.15, -0.95, 1.12, s * 0.625, s); decal(mb, A, no, 0.6, 0.14, -0.95, 0.96, s * 0.625, s); if (rp.id === 'UAL') decal(mb, A, plate, 0.5, 0.12, -1.35, 1.12, s * 0.625, s); }
+  if (rp.id === 'SWA') { const h = A.add(128, 128, swHeart()); decal(mb, A, h, 0.34, 0.34, 1.535, 0.95, 0, 'f'); }
+  const g = mb.build(); g.userData = { kind: 'bagtractor', len: 3.3, wid: 1.4 }; return g;
 }
 function baggageCartProto(seed = 1) {
   const m = mats(), mb = new MB(); const r = rng(seed);
@@ -604,7 +815,7 @@ function gpuProto() {
 // small 28 V GA ground-power cart that a line tech wheels to the cowling
 function gaGpuProto() {
   const m = mats(), mb = new MB(), A = new Atlas(256, 64);
-  const red = m.paint(0xb51f24);
+  const red = m.paint(PROF.id ? PROF.fbo.tug : 0xb51f24);
   mb.add(rbox(0.9, 0.62, 0.6, 0.05), red, [0, 0.62, 0]); mb.add(box(0.6, 0.04, 0.5), m.chassis, [0, 0.95, 0]);
   mb.add(cylY(0.02, 0.6, 6), m.chassis, [-0.55, 1.0, 0.22], [0, 0, 0.35]); mb.add(cylY(0.02, 0.6, 6), m.chassis, [-0.55, 1.0, -0.22], [0, 0, 0.35]); mb.add(cylZ(0.025, 0.5, 6), m.chassis, [-0.65, 1.27, 0]);
   for (const s of [-1, 1]) { wheel(mb, 0.25, s * 0.34, 0.14, 0.08); wheel(mb, -0.25, s * 0.34, 0.14, 0.08); }
@@ -666,9 +877,10 @@ function coolerProto() { const m = mats(), mb = new MB(); mb.add(rbox(0.55, 0.38
 function rollerBagProto(col) { const m = mats(), mb = new MB(); mb.add(rbox(0.36, 0.55, 0.22, 0.04), m.paint(col, { rough: 0.45, clear: 0.3 }), [0, 0.36, 0]); mb.add(cylY(0.01, 0.4, 6), m.chrome, [0, 0.83, 0.07]); mb.add(cylY(0.01, 0.4, 6), m.chrome, [0, 0.83, -0.07]); mb.add(box(0.02, 0.03, 0.17), m.plastic, [0, 1.03, 0]); for (const s of [-1, 1]) mb.add(cylZ(0.03, 0.03, 8), m.plastic, [-0.12, 0.04, s * 0.09]); return mb.build(); }
 
 export const GSE = {
-  avgas: () => proto('avgas', avgasTruckProto), jet: () => proto('jet', jetTruckProto), catering: () => proto('catering', cateringTruckProto),
-  van: () => proto('van', () => vanProto()), tug: () => proto('tug', tugProto), gatug: () => proto('gatug', gaTugProto), bus: () => proto('bus', busProto),
-  belt: () => proto('belt', beltLoaderProto), bagtractor: () => proto('bagtractor', baggageTractorProto), cart: (s = 1) => proto('cart' + (s % 3), () => baggageCartProto(s % 3 + 1)),
+  avgas: () => proto('avgas', avgasTruckProto), jet: () => proto('jet', jetTruckProto), catering: (lv = '') => proto('catering' + lv, () => cateringTruckProto(lv)),
+  van: () => proto('van', () => vanProto()), tug: (lv = '') => proto('tug' + lv, () => tugProto(lv)), gatug: () => proto('gatug', gaTugProto), bus: () => proto('bus', busProto),
+  belt: (lv = '') => proto('belt' + lv, () => beltLoaderProto(lv)), bagtractor: (lv = '') => proto('bagtractor' + lv, () => baggageTractorProto(lv)),
+  hydrant: () => proto('hydrant', hydrantProto), pit: () => proto('pit', hydrantPitProto), water: () => proto('water', waterTruckProto), cart: (s = 1) => proto('cart' + (s % 3), () => baggageCartProto(s % 3 + 1)),
   gpu: () => proto('gpu', gpuProto), gagpu: () => proto('gagpu', gaGpuProto), ladder: () => proto('ladder', ladderProto), handcart: () => proto('handcart', handCartProto),
   cooler: () => proto('cooler', coolerProto), towbar: () => proto('towbar', towbarProto), rollerBag: (c = 0x2b3a55) => proto('bag' + c, () => rollerBagProto(c)),
   stairs: (h) => { const k = Math.round(h * 4) / 4; return proto('stairs' + k, () => stairsProto(k)); },
